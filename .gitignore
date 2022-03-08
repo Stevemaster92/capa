@@ -118,3 +118,7 @@ rule-linter-output.log
 scripts/perf/*.txt
 scripts/perf/*.svg
 scripts/perf/*.zip
+
+# Generated output files
+*.csv
+*.clog
