@@ -929,10 +929,14 @@ def main(argv=None):
     samples = collect_samples(args.sample)
     spinner.succeed("%s sample(s) found" % len(samples))
 
+    ret = 0
     analysis_ts = int(time.time() * 1000)
+    has_csv_header = True
+    samples_done = 0
+    total_samples = len(samples)
 
     for i, sample in enumerate(samples):
-        spinner.info("analyzing '%s'" % sample)
+        spinner.info("analyzing %s of %s samples: '%s'" % (i + 1, total_samples, sample))
 
         try:
             taste = get_file_taste(sample)
@@ -940,7 +944,8 @@ def main(argv=None):
             # per our research there's not a programmatic way to render the IOError with non-ASCII filename unless we
             # handle the IOError separately and reach into the args
             logger.error("%s", e.args[0])
-            return E_MISSING_FILE
+            ret = E_MISSING_FILE
+            continue
 
         try:
             rules = get_rules(args.rules, disable_progress=args.quiet)
@@ -961,7 +966,8 @@ def main(argv=None):
                     logger.debug(" %d. %s", i, r)
         except (IOError, capa.rules.InvalidRule, capa.rules.InvalidRuleSet) as e:
             logger.error("%s", str(e))
-            return E_INVALID_RULE
+            ret = E_INVALID_RULE
+            continue
 
         file_extractor = None
         if args.format == "pe" or (args.format == "auto" and taste.startswith(b"MZ")):
@@ -973,24 +979,28 @@ def main(argv=None):
                 file_extractor = capa.features.extractors.pefile.PefileFeatureExtractor(sample)
             except PEFormatError as e:
                 logger.error("Input file '%s' is not a valid PE file: %s", sample, str(e))
-                return E_CORRUPT_FILE
+                ret = E_CORRUPT_FILE
+                continue
 
         elif args.format == "elf" or (args.format == "auto" and taste.startswith(b"\x7fELF")):
             try:
                 file_extractor = capa.features.extractors.elffile.ElfFeatureExtractor(sample)
             except (ELFError, OverflowError) as e:
                 logger.error("Input file '%s' is not a valid ELF file: %s", sample, str(e))
-                return E_CORRUPT_FILE
+                ret = E_CORRUPT_FILE
+                continue
 
         if file_extractor:
             try:
                 pure_file_capabilities, _ = find_file_capabilities(rules, file_extractor, {})
             except PEFormatError as e:
                 logger.error("Input file '%s' is not a valid PE file: %s", sample, str(e))
-                return E_CORRUPT_FILE
+                ret = E_CORRUPT_FILE
+                continue
             except (ELFError, OverflowError) as e:
                 logger.error("Input file '%s' is not a valid ELF file: %s", sample, str(e))
-                return E_CORRUPT_FILE
+                ret = E_CORRUPT_FILE
+                continue
 
             # file limitations that rely on non-file scope won't be detected here.
             # nor on FunctionName features, because pefile doesn't support this.
@@ -999,7 +1009,8 @@ def main(argv=None):
                 # do show the output in verbose mode, though.
                 if not (args.verbose or args.vverbose or args.json):
                     logger.debug("file limitation short circuit, won't analyze fully.")
-                    return E_FILE_LIMITATION
+                    ret = E_FILE_LIMITATION
+                    continue
 
         try:
             if args.format == "pe" or (args.format == "auto" and taste.startswith(b"MZ")):
@@ -1009,7 +1020,8 @@ def main(argv=None):
                 logger.debug("skipping library code matching: only have PE signatures")
         except (IOError) as e:
             logger.error("%s", str(e))
-            return E_INVALID_SIG
+            ret = E_INVALID_SIG
+            continue
 
         if (args.format == "freeze") or (args.format == "auto" and capa.features.freeze.is_freeze(taste)):
             format = "freeze"
@@ -1037,14 +1049,16 @@ def main(argv=None):
                 )
                 logger.error(" If you don't know the input file type, you can try using the `file` utility to guess it.")
                 logger.error("-" * 80)
-                return E_INVALID_FILE_TYPE
+                ret = E_INVALID_FILE_TYPE
+                continue
             except UnsupportedArchError:
                 logger.error("-" * 80)
                 logger.error(" Input file does not appear to target a supported architecture.")
                 logger.error(" ")
                 logger.error(" capa currently only supports analyzing x86 (32- and 64-bit).")
                 logger.error("-" * 80)
-                return E_INVALID_FILE_ARCH
+                ret = E_INVALID_FILE_ARCH
+                continue
             except UnsupportedOSError:
                 logger.error("-" * 80)
                 logger.error(" Input file does not appear to target a supported OS.")
@@ -1053,7 +1067,8 @@ def main(argv=None):
                     " capa currently only supports analyzing executables for some operating systems (including Windows and Linux)."
                 )
                 logger.error("-" * 80)
-                return E_INVALID_FILE_OS
+                ret = E_INVALID_FILE_OS
+                continue
 
         meta = collect_metadata(argv, sample, args.rules, extractor)
 
@@ -1065,18 +1080,21 @@ def main(argv=None):
             # bail if capa encountered file limitation e.g. a packed binary
             # do show the output in verbose mode, though.
             if not (args.verbose or args.vverbose or args.json):
-                return E_FILE_LIMITATION
+                ret = E_FILE_LIMITATION
+                continue
 
         if args.json:
             print(capa.render.json.render(meta, rules, capabilities))
         elif args.csv:
-            csv = capa.render.csv.render(meta, rules, capabilities, i == 0)
+            csv = capa.render.csv.render(meta, rules, capabilities, has_csv_header)
 
             # Write the result to a file instead of printing to the console.
             filepath = "./capa-%s.csv" % analysis_ts
             with open(filepath, "a") as file:
                 file.write(csv)
                 file.write("\n")
+
+            has_csv_header = False
         elif args.vverbose:
             print(capa.render.vverbose.render(meta, rules, capabilities))
         elif args.verbose:
@@ -1098,13 +1116,14 @@ def main(argv=None):
                 # Remove ANSI sequences generated by termcolor.
                 file.write(ANSI_ESCAPE.sub("", result))
 
-        spinner.succeed("%s of %s samples done" % (i + 1, len(samples)))
+        samples_done += 1
+        spinner.succeed("%s of %s samples done" % (samples_done, total_samples))
 
     colorama.deinit()
 
     logger.debug("done.")
 
-    return 0
+    return ret
 
 
 def ida_main():
