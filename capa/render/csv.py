@@ -41,6 +41,7 @@ def find_subrule_matches(doc):
 def render_header(ostream: StringIO):
     cols = [
         "Path",
+        "Error",
         # "MD5",
         # "SHA1",
         "SHA256",
@@ -66,6 +67,7 @@ def render_header(ostream: StringIO):
 def render_meta(doc, ostream: StringIO):
     cols = [
         doc["meta"]["sample"]["path"],
+        "0 - OK",  # no error
         # doc["meta"]["sample"]["md5"],
         # doc["meta"]["sample"]["sha1"],
         doc["meta"]["sample"]["sha256"],
@@ -173,6 +175,22 @@ def render_csv(doc, has_header: bool):
     render_total_numbers(s_attack, s_mbc, s_capability, ostream)
     render_items(s_attack, ALL_ATTACK, ostream)
     render_items(s_mbc, ALL_MBC, ostream)
+
+    return ostream.getvalue()
+
+
+def render_error(code: int, msg: str, path: str, has_header=False):
+    ostream = rutils.StringIO()
+
+    if has_header:
+        render_header(ostream)
+
+    cols = [
+        path,
+        "%s - %s" % (str(code), msg)
+    ]
+
+    ostream.write("\t".join(cols))
 
     return ostream.getvalue()
 
