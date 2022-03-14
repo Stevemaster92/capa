@@ -891,10 +891,147 @@ def log_error(code: int, msg: str, path: str, csv: bool, has_header: bool, times
     log any type of error indicated by its `code` and `msg`.
     if the CSV flag is set, write the error to the CSV report.
     """
-    logger.error(msg)
+    logger.error(" %s", msg)
     if csv:
-        result = capa.render.csv.render_error(path, code, msg, has_header)
+        result = capa.render.csv.render_error(code, msg, path, has_header)
         write_csv(result, timestamp)
+
+
+def load_rules(args) -> Tuple[int, str, List[Rule]]:
+    try:
+        rules = get_rules(args.rules, disable_progress=args.quiet)
+        rules = capa.rules.RuleSet(rules)
+
+        logger.debug(
+            "successfully loaded %s rules",
+            # during the load of the RuleSet, we extract subscope statements into their own rules
+            # that are subsequently `match`ed upon. this inflates the total rule count.
+            # so, filter out the subscope rules when reporting total number of loaded rules.
+            len([i for i in filter(lambda r: "capa/subscope-rule" not in r.meta, rules.rules.values())]),
+        )
+        if args.tag:
+            rules = rules.filter_rules_by_meta(args.tag)
+            logger.debug("selected %d rules", len(rules))
+            for i, r in enumerate(rules.rules, 1):
+                # TODO don't display subscope rules?
+                logger.debug(" %d. %s", i, r)
+    except (IOError, capa.rules.InvalidRule, capa.rules.InvalidRuleSet) as e:
+        return (E_INVALID_RULE, str(e), None)
+
+    return (0, "OK", rules)
+
+
+def analyze_sample(args, sample, rules) -> Tuple[int, str, Dict[str, Any], MatchResults]:
+    try:
+        taste = get_file_taste(sample)
+    except IOError as e:
+        # per our research there's not a programmatic way to render the IOError with non-ASCII filename unless we
+        # handle the IOError separately and reach into the args
+        return (E_MISSING_FILE, e.args[0], None, None)
+
+    file_extractor = None
+    if args.format == "pe" or (args.format == "auto" and taste.startswith(b"MZ")):
+        # these pefile and elffile file feature extractors are pretty light weight: they don't do any code analysis.
+        # so we can fairly quickly determine if the given file has "pure" file-scope rules
+        # that indicate a limitation (like "file is packed based on section names")
+        # and avoid doing a full code analysis on difficult/impossible binaries.
+        try:
+            file_extractor = capa.features.extractors.pefile.PefileFeatureExtractor(sample)
+        except PEFormatError as e:
+            return (E_CORRUPT_FILE, "Input file '%s' is not a valid PE file: %s" % (sample, str(e)), None, None)
+
+    elif args.format == "elf" or (args.format == "auto" and taste.startswith(b"\x7fELF")):
+        try:
+            file_extractor = capa.features.extractors.elffile.ElfFeatureExtractor(sample)
+        except (ELFError, OverflowError) as e:
+            return (E_CORRUPT_FILE, "Input file '%s' is not a valid ELF file: %s" % (sample, str(e)), None, None)
+
+    if file_extractor:
+        try:
+            pure_file_capabilities, _ = find_file_capabilities(rules, file_extractor, {})
+        except PEFormatError as e:
+            return (E_CORRUPT_FILE, "Input file '%s' is not a valid PE file: %s" % (sample, str(e)), None, None)
+        except (ELFError, OverflowError) as e:
+            return (E_CORRUPT_FILE, "Input file '%s' is not a valid ELF file: %s" % (sample, str(e)), None, None)
+
+        # file limitations that rely on non-file scope won't be detected here.
+        # nor on FunctionName features, because pefile doesn't support this.
+        if has_file_limitation(rules, pure_file_capabilities):
+            # bail if capa encountered file limitation e.g. a packed binary
+            # do show the output in verbose mode, though.
+            if not (args.verbose or args.vverbose or args.json):
+                logger.debug("file limitation short circuit, won't analyze fully.")
+                return (E_FILE_LIMITATION, "File limitation: won't analyze input file '%s' fully" % sample, None, None)
+
+    try:
+        if args.format == "pe" or (args.format == "auto" and taste.startswith(b"MZ")):
+            sig_paths = get_signatures(args.signatures)
+        else:
+            sig_paths = []
+            logger.debug("skipping library code matching: only have PE signatures")
+    except (IOError) as e:
+        return (E_INVALID_SIG, str(e), None, None)
+
+    if (args.format == "freeze") or (args.format == "auto" and capa.features.freeze.is_freeze(taste)):
+        format = "freeze"
+        with open(sample, "rb") as f:
+            extractor = capa.features.freeze.load(f.read())
+    else:
+        format = args.format
+        if format == "auto" and sample.endswith(EXTENSIONS_SHELLCODE_32):
+            format = "sc32"
+        elif format == "auto" and sample.endswith(EXTENSIONS_SHELLCODE_64):
+            format = "sc64"
+
+        should_save_workspace = os.environ.get("CAPA_SAVE_WORKSPACE") not in ("0", "no", "NO", "n", None)
+
+        try:
+            extractor = get_extractor(
+                sample, format, args.backend, sig_paths, should_save_workspace, disable_progress=args.quiet
+            )
+        except UnsupportedFormatError:
+            msg = "Input file does not appear to be a PE or ELF file."
+            logger.error("-" * 80)
+            logger.error(" %s", msg)
+            logger.error(" ")
+            logger.error(
+                " capa currently only supports analyzing PE and ELF files (or shellcode, when using --format sc32|sc64)."
+            )
+            logger.error(" If you don't know the input file type, you can try using the `file` utility to guess it.")
+            logger.error("-" * 80)
+            return (E_INVALID_FILE_TYPE, msg, None, None)
+        except UnsupportedArchError:
+            msg = "Input file does not appear to target a supported architecture."
+            logger.error("-" * 80)
+            logger.error(" %s", msg)
+            logger.error(" ")
+            logger.error(" capa currently only supports analyzing x86 (32- and 64-bit).")
+            logger.error("-" * 80)
+            return (E_INVALID_FILE_ARCH, msg, None, None)
+        except UnsupportedOSError:
+            msg = "Input file does not appear to target a supported OS."
+            logger.error("-" * 80)
+            logger.error(" %s", msg)
+            logger.error(" ")
+            logger.error(
+                " capa currently only supports analyzing executables for some operating systems (including Windows and Linux)."
+            )
+            logger.error("-" * 80)
+            return (E_INVALID_FILE_OS, msg, None, None)
+
+    meta = collect_metadata(str(args), sample, args.rules, extractor)
+
+    capabilities, counts = find_capabilities(rules, extractor, disable_progress=args.quiet)
+    meta["analysis"].update(counts)
+    meta["analysis"]["layout"] = compute_layout(rules, extractor, capabilities)
+
+    if has_file_limitation(rules, capabilities):
+        # bail if capa encountered file limitation e.g. a packed binary
+        # do show the output in verbose mode, though.
+        if not (args.verbose or args.vverbose or args.json):
+            return (E_FILE_LIMITATION, "File limitation: won't analyze input file '%s' fully" % sample, None, None)
+
+    return (0, "OK", meta, capabilities)
 
 
 def main(argv=None):
@@ -951,226 +1088,56 @@ def main(argv=None):
     samples = collect_samples(args.sample)
     spinner.succeed("%s sample(s) found" % len(samples))
 
-    ret = 0
     analysis_ts = int(time.time() * 1000)
     has_csv_header = True
     samples_done = 0
     total_samples = len(samples)
 
-    for i, sample in enumerate(samples):
-        spinner.info("analyzing %s of %s samples: '%s'" % (i + 1, total_samples, sample))
+    ret, msg, rules = load_rules(args)
+    if ret != 0:
+        log_error(ret, msg, sample, args.csv, has_csv_header, analysis_ts)
 
-        try:
-            taste = get_file_taste(sample)
-        except IOError as e:
-            # per our research there's not a programmatic way to render the IOError with non-ASCII filename unless we
-            # handle the IOError separately and reach into the args
-            ret = E_MISSING_FILE
-            log_error(ret, e.args[0], sample, args.csv, has_csv_header, analysis_ts)
-            continue
+    if ret == 0:
+        for i, sample in enumerate(samples):
+            spinner.info("analyzing %s of %s samples: '%s'" % (i + 1, total_samples, sample))
 
-        try:
-            rules = get_rules(args.rules, disable_progress=args.quiet)
-            rules = capa.rules.RuleSet(rules)
-
-            logger.debug(
-                "successfully loaded %s rules",
-                # during the load of the RuleSet, we extract subscope statements into their own rules
-                # that are subsequently `match`ed upon. this inflates the total rule count.
-                # so, filter out the subscope rules when reporting total number of loaded rules.
-                len([i for i in filter(lambda r: "capa/subscope-rule" not in r.meta, rules.rules.values())]),
-            )
-            if args.tag:
-                rules = rules.filter_rules_by_meta(args.tag)
-                logger.debug("selected %d rules", len(rules))
-                for i, r in enumerate(rules.rules, 1):
-                    # TODO don't display subscope rules?
-                    logger.debug(" %d. %s", i, r)
-        except (IOError, capa.rules.InvalidRule, capa.rules.InvalidRuleSet) as e:
-            ret = E_INVALID_RULE
-            log_error(ret, str(e), sample, args.csv, has_csv_header, analysis_ts)
-            continue
-
-        file_extractor = None
-        if args.format == "pe" or (args.format == "auto" and taste.startswith(b"MZ")):
-            # these pefile and elffile file feature extractors are pretty light weight: they don't do any code analysis.
-            # so we can fairly quickly determine if the given file has "pure" file-scope rules
-            # that indicate a limitation (like "file is packed based on section names")
-            # and avoid doing a full code analysis on difficult/impossible binaries.
-            try:
-                file_extractor = capa.features.extractors.pefile.PefileFeatureExtractor(sample)
-            except PEFormatError as e:
-                ret = E_CORRUPT_FILE
-                log_error(
-                    ret,
-                    "Input file '%s' is not a valid PE file: %s" % (sample, str(e)),
-                    sample, args.csv, has_csv_header, analysis_ts
-                )
+            err, msg, meta, capabilities = analyze_sample(args, sample, rules)
+            if err != 0:
+                log_error(err, msg, sample, args.csv, has_csv_header, analysis_ts)
                 continue
 
-        elif args.format == "elf" or (args.format == "auto" and taste.startswith(b"\x7fELF")):
-            try:
-                file_extractor = capa.features.extractors.elffile.ElfFeatureExtractor(sample)
-            except (ELFError, OverflowError) as e:
-                ret = E_CORRUPT_FILE
-                log_error(
-                    ret,
-                    "Input file '%s' is not a valid ELF file: %s" % (sample, str(e)),
-                    sample, args.csv, has_csv_header, analysis_ts
-                )
-                continue
+            # Decide how to render the result.
+            if args.json:
+                print(capa.render.json.render(meta, rules, capabilities))
+            elif args.csv:
+                csv = capa.render.csv.render(meta, rules, capabilities, has_csv_header)
 
-        if file_extractor:
-            try:
-                pure_file_capabilities, _ = find_file_capabilities(rules, file_extractor, {})
-            except PEFormatError as e:
-                ret = E_CORRUPT_FILE
-                log_error(
-                    ret,
-                    "Input file '%s' is not a valid PE file: %s" % (sample, str(e)),
-                    sample, args.csv, has_csv_header, analysis_ts
-                )
-                continue
-            except (ELFError, OverflowError) as e:
-                ret = E_CORRUPT_FILE
-                log_error(
-                    ret,
-                    "Input file '%s' is not a valid ELF file: %s" % (sample, str(e)),
-                    sample, args.csv, has_csv_header, analysis_ts
-                )
-                continue
-
-            # file limitations that rely on non-file scope won't be detected here.
-            # nor on FunctionName features, because pefile doesn't support this.
-            if has_file_limitation(rules, pure_file_capabilities):
-                # bail if capa encountered file limitation e.g. a packed binary
-                # do show the output in verbose mode, though.
-                if not (args.verbose or args.vverbose or args.json):
-                    logger.debug("file limitation short circuit, won't analyze fully.")
-                    ret = E_FILE_LIMITATION
-                    log_error(
-                        ret,
-                        "File limitation: won't analyze input file '%s' fully" % sample,
-                        sample, args.csv, has_csv_header, analysis_ts
-                    )
-                    continue
-
-        try:
-            if args.format == "pe" or (args.format == "auto" and taste.startswith(b"MZ")):
-                sig_paths = get_signatures(args.signatures)
+                # Write the result to a file instead of printing to the console.
+                write_csv(csv, analysis_ts)
+                has_csv_header = False
+            elif args.vverbose:
+                print(capa.render.vverbose.render(meta, rules, capabilities))
+            elif args.verbose:
+                print(capa.render.verbose.render(meta, rules, capabilities))
             else:
-                sig_paths = []
-                logger.debug("skipping library code matching: only have PE signatures")
-        except (IOError) as e:
-            ret = E_INVALID_SIG
-            log_error(ret, str(e), sample, args.csv, has_csv_header, analysis_ts)
-            continue
-
-        if (args.format == "freeze") or (args.format == "auto" and capa.features.freeze.is_freeze(taste)):
-            format = "freeze"
-            with open(sample, "rb") as f:
-                extractor = capa.features.freeze.load(f.read())
-        else:
-            format = args.format
-            if format == "auto" and sample.endswith(EXTENSIONS_SHELLCODE_32):
-                format = "sc32"
-            elif format == "auto" and sample.endswith(EXTENSIONS_SHELLCODE_64):
-                format = "sc64"
-
-            should_save_workspace = os.environ.get("CAPA_SAVE_WORKSPACE") not in ("0", "no", "NO", "n", None)
-
-            try:
-                extractor = get_extractor(
-                    sample, format, args.backend, sig_paths, should_save_workspace, disable_progress=args.quiet
-                )
-            except UnsupportedFormatError:
-                msg = "Input file does not appear to be a PE or ELF file."
-                ret = E_INVALID_FILE_TYPE
-                log_error(ret, msg, sample, args.csv, has_csv_header, analysis_ts)
-
-                logger.error("-" * 80)
-                logger.error(" %s", msg)
-                logger.error(" ")
-                logger.error(
-                    " capa currently only supports analyzing PE and ELF files (or shellcode, when using --format sc32|sc64)."
-                )
-                logger.error(" If you don't know the input file type, you can try using the `file` utility to guess it.")
-                logger.error("-" * 80)
-                continue
-            except UnsupportedArchError:
-                msg = "Input file does not appear to target a supported architecture."
-                ret = E_INVALID_FILE_ARCH
-                log_error(ret, msg, sample, args.csv, has_csv_header, analysis_ts)
-
-                logger.error("-" * 80)
-                logger.error(" %s", msg)
-                logger.error(" ")
-                logger.error(" capa currently only supports analyzing x86 (32- and 64-bit).")
-                logger.error("-" * 80)
-                continue
-            except UnsupportedOSError:
-                msg = "Input file does not appear to target a supported OS."
-                ret = E_INVALID_FILE_OS
-                log_error(ret, msg, sample, args.csv, has_csv_header, analysis_ts)
-
-                logger.error("-" * 80)
-                logger.error(" %s", msg)
-                logger.error(" ")
-                logger.error(
-                    " capa currently only supports analyzing executables for some operating systems (including Windows and Linux)."
-                )
-                logger.error("-" * 80)
-                continue
-
-        meta = collect_metadata(argv, sample, args.rules, extractor)
-
-        capabilities, counts = find_capabilities(rules, extractor, disable_progress=args.quiet)
-        meta["analysis"].update(counts)
-        meta["analysis"]["layout"] = compute_layout(rules, extractor, capabilities)
-
-        if has_file_limitation(rules, capabilities):
-            # bail if capa encountered file limitation e.g. a packed binary
-            # do show the output in verbose mode, though.
-            if not (args.verbose or args.vverbose or args.json):
-                ret = E_FILE_LIMITATION
-                log_error(
-                    ret,
-                    "File limitation: won't analyze input file '%s' fully" % sample,
-                    sample, args.csv, has_csv_header, analysis_ts
-                )
-                continue
-
-        if args.json:
-            print(capa.render.json.render(meta, rules, capabilities))
-        elif args.csv:
-            csv = capa.render.csv.render(meta, rules, capabilities, has_csv_header)
-
-            # Write the result to a file instead of printing to the console.
-            write_csv(csv, analysis_ts)
-            has_csv_header = False
-        elif args.vverbose:
-            print(capa.render.vverbose.render(meta, rules, capabilities))
-        elif args.verbose:
-            print(capa.render.verbose.render(meta, rules, capabilities))
-        else:
-            result = capa.render.default.render(meta, rules, capabilities)
-            print(result)
-
-        if args.log:
-            # Check for the presence of the default result document to avoid redundant work.
-            try:
-                result
-            except NameError:
                 result = capa.render.default.render(meta, rules, capabilities)
+                print(result)
 
-            # Name the CAPA log file after the sample and create it in the same directory.
-            filename = "%s-%s.clog" % (os.path.splitext(os.path.basename(sample))[0], analysis_ts)
-            with open(os.path.join(os.path.dirname(sample), filename), "w") as file:
-                # Remove ANSI sequences generated by termcolor.
-                file.write(ANSI_ESCAPE.sub("", result))
+            if args.log:
+                # Check for the presence of the default result document to avoid redundant work.
+                try:
+                    result
+                except NameError:
+                    result = capa.render.default.render(meta, rules, capabilities)
 
-        samples_done += 1
-        spinner.succeed("%s of %s samples done" % (samples_done, total_samples))
+                # Name the CAPA log file after the sample and create it in the same directory.
+                filename = "%s-%s.clog" % (os.path.splitext(os.path.basename(sample))[0], analysis_ts)
+                with open(os.path.join(os.path.dirname(sample), filename), "w") as file:
+                    # Remove ANSI sequences generated by termcolor.
+                    file.write(ANSI_ESCAPE.sub("", result))
+
+            samples_done += 1
+            spinner.succeed("%s of %s samples done" % (samples_done, total_samples))
 
     colorama.deinit()
 
