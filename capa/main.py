@@ -13,7 +13,7 @@ import os
 import re
 import signal
 import sys
-import threading
+from threading import Event, Thread
 import time
 import hashlib
 import logging
@@ -768,6 +768,9 @@ def install_common_args(parser, wanted=None):
     if "tag" in wanted:
         parser.add_argument("-t", "--tag", type=str, help="filter on rule meta field values")
 
+    if "timeout" in wanted:
+        parser.add_argument("--timeout", type=int, help="analysis timeout in minutes, default: 10")
+
 
 def handle_common_args(args):
     """
@@ -1068,19 +1071,6 @@ def render_result(args, sample: str, meta, rules: RuleSet, capabilities: MatchRe
             file.write(ANSI_ESCAPE.sub("", result))
 
 
-def timeout(secs: float, event: threading.Event):
-    """
-    raise the SIGINT signal (Ctrl+C) after `secs` seconds and if the `event` flag has not been set to true in the meantime.
-    """
-    while secs > 0 and not event.is_set():
-        time.sleep(1)
-        secs -= 1
-
-    if not event.is_set():
-        # Raise KeyboardInterrupt exception in main thread.
-        signal.raise_signal(signal.SIGINT)
-
-
 def main(argv=None):
     if sys.version_info < (3, 6):
         raise UnsupportedRuntimeError("This version of capa can only be used with Python 3.6+")
@@ -1129,7 +1119,7 @@ def main(argv=None):
     parser = argparse.ArgumentParser(
         description=desc, epilog=epilog, formatter_class=argparse.RawDescriptionHelpFormatter
     )
-    install_common_args(parser, {"sample", "format", "backend", "signatures", "rules", "tag"})
+    install_common_args(parser, {"sample", "format", "backend", "signatures", "rules", "tag", "timeout"})
     parser.add_argument("-j", "--json", action="store_true", help="emit JSON instead of text")
     parser.add_argument("-c", "--csv", action="store_true",
                         help="create CSV report (TAB as delimiter) from result document(s)")
@@ -1157,20 +1147,21 @@ def main(argv=None):
         write_csv(capa.render.csv.render_header(), analysis_ts)
 
     # Analyze samples.
-    event = threading.Event()
+    timeout = 600 if args.timeout is None else (args.timeout * 60)  # default: 10 min timeout
+    skip_timeout = Event()
     samples_done = 0
     total_samples = len(samples)
     for sample in samples:
         spinner.info("analyzing '%s' (press Ctrl+C to abort)" % sample)
 
         # Prepare timeout event.
-        event.clear()
-        timeout_thread = threading.Thread(target=timeout, args=(300, event))  # 5 min timeout
-        timeout_thread.start()
+        skip_timeout.clear()
+        thread = TimeoutThread(timeout, skip_timeout)
+        thread.start()
 
         try:
             ret, msg, meta, capabilities = analyze_sample(args, sample, rules)
-            event.set()
+            skip_timeout.set()
 
             if ret != 0:
                 log_error(ret, msg, sample, analysis_ts, args.csv)
@@ -1178,7 +1169,7 @@ def main(argv=None):
                 render_result(args, sample, meta, rules, capabilities, analysis_ts)
         except KeyboardInterrupt:
             # Abort the analysis (e.g. after timeout or it might take too long) by catching the first exception
-            event.set()
+            skip_timeout.set()
             spinner.fail("analysis aborted")
             log_error(E_ABORT_TIMEOUT, "Analysis aborted or timed out: '%s'" % sample, sample, analysis_ts, args.csv)
 
@@ -1186,7 +1177,7 @@ def main(argv=None):
             spinner.start("waiting 5 seconds to continue (press Ctrl+C again to quit)")
             time.sleep(5)
         finally:
-            timeout_thread.join()
+            thread.join()
 
         samples_done += 1
         spinner.succeed("%s of %s samples done" % (samples_done, total_samples))
@@ -1255,3 +1246,22 @@ if __name__ == "__main__":
         ida_main()
     else:
         sys.exit(main())
+
+
+class TimeoutThread(Thread):
+    def __init__(self, secs: float, skip: Event):
+        """
+        raise the SIGINT signal (Ctrl+C) after `secs` seconds and if the `event` flag has not been set to true in the meantime.
+        """
+        super().__init__(name="TimeoutThread")
+        self.timeout = secs
+        self.skip = skip
+
+    def run(self):
+        while self.timeout > 0 and not self.skip.is_set():
+            time.sleep(1)
+            self.timeout -= 1
+
+        if not self.skip.is_set():
+            # Raise KeyboardInterrupt exception in main thread.
+            signal.raise_signal(signal.SIGINT)

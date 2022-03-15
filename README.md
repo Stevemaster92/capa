@@ -173,12 +173,31 @@ The [capa-testfiles repository](https://github.com/mandiant/capa-testfiles) cont
 
 Compared to the features from the original [capa repository](https://github.com/mandiant/capa), I have implemented some Quality-of-Life addons and made minor changes (e.g. improve code readability).
 
+Check out:
+
+-   [analyze directories](#analyze-directories)
+-   [analysis timeout](#analysis-timeout)
+-   [CSV report](#csv-report)
+-   [LOG file export](#log-file-export)
+
 ## analyze directories
 
 In addition to analyzing a single file, capa analyzes all files located in a directory and all its subdirectories. Just provide a directory path instead of a single file path for `sample`. _Note: I recommend to redirect the output to a file, otherwise the console output will be overwhelming when analyzing many files._
 
+Here's an example on how to submit a directory containing multiple suspicious files. Optionally, the results are written to the text file `results.txt`:
+
 ```
 capa.exe suspicious-dir/ [> results.txt]
+```
+
+## analysis timeout
+
+By passing the `--timeout TIMEOUT` argument, capa aborts the analysis after `TIMEOUT` minutes. If `--timeout` is not specified (default), the timeout is set to _10 minutes_.
+
+Here's an example on how to set the analysis timeout to 30 minutes:
+
+```
+capa.exe --timeout 30 suspicious.exe
 ```
 
 ## CSV report
@@ -195,8 +214,20 @@ By passing the `-c` or `--csv` flag, capa creates a predefined CSV report from t
 -   an entry for each ATT&CK tactic-technique pair indicating if the corresponding capability was found (1) or not (0)
 -   an entry for each MBC objective-behavior pair indicating if the corresponding capability was found (1) or not (0)
 
-The code for rendering the CSV report can be found in `render/csv.py`. _Note: You can uncomment the remaining metadata fields in the code to add them to the CSV report._
+The CSV report is stored to a file `<sample-filename>-<timestamp>.csv`. The code for rendering the CSV report can be found in `render/csv.py`. _Note: You can uncomment the remaining metadata fields in the code to add them to the CSV report._
 
-## LOG file
+Here's an example on how to create a CSV report from the analysis of a directory containing suspicious files:
 
-By passing the `-l` or `--log` flag, capa writes the **default** result document directly to a log file `<filename>-<timestamp>.clog` in addition to printing it to the console.
+```
+capa.exe --csv suspicious-dir/
+```
+
+## LOG file export
+
+By passing the `-l` or `--log` flag, capa writes the _default_ result document directly to a log file `<sample-filename>-<timestamp>.clog` in addition to printing it to the console.
+
+Here's an example on how to export the log files from the analysis of a directory containing suspicious files:
+
+```
+capa.exe --log suspicious-dir/
+```
