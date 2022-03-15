@@ -38,32 +38,6 @@ def find_subrule_matches(doc):
     return matches
 
 
-def render_header(ostream: StringIO):
-    cols = [
-        "Path",
-        "Error",
-        # "MD5",
-        # "SHA1",
-        "SHA256",
-        "OS",
-        "Format",
-        # "Architecture",
-        "ATT&CK Tactics",
-        "ATT&CK Techniques",
-        "MBC Objectives",
-        "MBC Behaviors",
-        "Capabilities"
-    ]
-
-    # Append headers for attacks and MBCs
-    for key, values in itertools.chain(ALL_ATTACK.items(), ALL_MBC.items()):
-        for id, val in values.items():
-            cols.append("%s::%s::%s" % (key, val, id))
-
-    ostream.write("\t".join(cols))
-    ostream.write("\n")
-
-
 def render_meta(doc, ostream: StringIO):
     cols = [
         doc["meta"]["sample"]["path"],
@@ -161,15 +135,12 @@ def render_items(s_items: dict, all_items: Dict[str, Dict[str, str]], ostream: S
             ostream.write("\t")
 
 
-def render_csv(doc, has_header: bool):
+def render_csv(doc):
     ostream = rutils.StringIO()
 
     s_attack = get_items(doc, "att&ck")
     s_mbc = get_items(doc, "mbc")
     s_capability = get_items(doc, "capability")
-
-    if has_header:
-        render_header(ostream)
 
     render_meta(doc, ostream)
     render_total_numbers(s_attack, s_mbc, s_capability, ostream)
@@ -179,11 +150,38 @@ def render_csv(doc, has_header: bool):
     return ostream.getvalue()
 
 
-def render_error(code: int, msg: str, path: str, has_header=False):
+def render_header():
     ostream = rutils.StringIO()
 
-    if has_header:
-        render_header(ostream)
+    cols = [
+        "Path",
+        "Error",
+        # "MD5",
+        # "SHA1",
+        "SHA256",
+        "OS",
+        "Format",
+        # "Architecture",
+        "ATT&CK Tactics",
+        "ATT&CK Techniques",
+        "MBC Objectives",
+        "MBC Behaviors",
+        "Capabilities"
+    ]
+
+    # Append headers for attacks and MBCs
+    for key, values in itertools.chain(ALL_ATTACK.items(), ALL_MBC.items()):
+        for id, val in values.items():
+            cols.append("%s::%s::%s" % (key, val, id))
+
+    ostream.write("\t".join(cols))
+    ostream.write("\n")
+
+    return ostream.getvalue()
+
+
+def render_error(code: int, msg: str, path: str):
+    ostream = rutils.StringIO()
 
     cols = [
         path,
@@ -195,6 +193,6 @@ def render_error(code: int, msg: str, path: str, has_header=False):
     return ostream.getvalue()
 
 
-def render(meta, rules: RuleSet, capabilities: MatchResults, has_header=False) -> str:
+def render(meta, rules: RuleSet, capabilities: MatchResults) -> str:
     doc = capa.render.result_document.convert_capabilities_to_result_document(meta, rules, capabilities)
-    return render_csv(doc, has_header)
+    return render_csv(doc)
