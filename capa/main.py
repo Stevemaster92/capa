@@ -890,14 +890,15 @@ def collect_samples(sample: str) -> List[str]:
     sample_path = os.path.abspath(sample)
 
     samples = list()
-    if os.path.isdir(sample_path):
-        # sample = directory
-        for base, dirs, files in os.walk(sample_path):
-            for name in files:
-                samples.append(os.path.join(base, name))
-    else:
-        # sample = file
-        samples.append(sample_path)
+    if os.path.exists(sample_path):
+        if os.path.isdir(sample_path):
+            # sample = directory
+            for base, dirs, files in os.walk(sample_path):
+                for name in files:
+                    samples.append(os.path.join(base, name))
+        else:
+            # sample = file
+            samples.append(sample_path)
 
     return samples
 
@@ -923,7 +924,7 @@ def log_error(code: int, msg: str, path: str, timestamp: int, csv: bool):
         write_csv(capa.render.csv.render_error(code, msg, path), timestamp)
 
 
-def load_rules(args) -> Tuple[int, str, List[Rule]]:
+def load_rules(args) -> Tuple[int, str, RuleSet]:
     try:
         rules = get_rules(args.rules, disable_progress=args.quiet)
         rules = capa.rules.RuleSet(rules)
@@ -1156,6 +1157,9 @@ def main(argv=None):
     samples = collect_samples(args.sample)
     spinner.succeed("%s sample(s) found" % len(samples))
 
+    if len(samples) == 0:
+        return 0
+
     # Load rules.
     ret, msg, rules = load_rules(args)
     if ret != 0:
@@ -1168,7 +1172,7 @@ def main(argv=None):
 
     # Analyze samples.
     timeout = 600 if args.timeout is None else (args.timeout * 60)  # default: 10 min timeout
-    skip_timeout = Event()
+    skip_timeout = Event()  # Tell the TimeoutThread to skip sending SIGINT
     samples_done = 0
     total_samples = len(samples)
     for sample in samples:
@@ -1179,6 +1183,7 @@ def main(argv=None):
         thread = TimeoutThread(timeout, skip_timeout)
         thread.start()
 
+        start_time = time.time()
         try:
             ret, msg, meta, capabilities = analyze_sample(args, sample, rules)
             skip_timeout.set()
@@ -1202,6 +1207,11 @@ def main(argv=None):
                       (sample, str(e)), sample, analysis_ts, args.csv)
         finally:
             thread.join()
+            elapsed = int(time.time() - start_time)
+            spinner.info(
+                "analysis time: %d %s(s)" %
+                (elapsed if elapsed < 60 else elapsed / 60, "second" if elapsed < 60 else "minute")
+            )
 
         samples_done += 1
         spinner.succeed("%s of %s samples done" % (samples_done, total_samples))

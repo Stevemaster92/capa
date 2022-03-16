@@ -55,6 +55,9 @@ def render_meta(doc, ostream: StringIO):
 
 
 def get_total_numbers(items: dict):
+    """
+    return the total number of keys and values per key in `items` as pair (n_keys, n_values).
+    """
     # Count values of each key.
     total_values = 0
     for _, v in items.items():
@@ -81,6 +84,9 @@ def render_total_numbers(attack: dict, mbc: dict, capability: dict, ostream: Str
 
 
 def get_items(doc, key: str):
+    """
+    extract items by type specified by `key`, e.g. capability, att&ck, mbc.
+    """
     if key == "capability":
         subrule_matches = find_subrule_matches(doc)
 
@@ -113,6 +119,10 @@ def get_items(doc, key: str):
 
 def render_items(s_items: dict, all_items: Dict[str, Dict[str, str]], ostream: StringIO):
     """
+    args:
+        s_items (dict): the dictionary of capabilities belonging to the sample.
+        all_items (dict): the dictionary of all the reference capabilities (e.g. ATT&CK or MBC).
+        ostream (StringIO): the output stream to write the results to.
     example::
 
         key::root_val_1::child_val_1   key::root_val_1::child_val_2   [...]   key::root_val_2::child_val_1   key::root_val_2::child_val_2   [...]
@@ -175,7 +185,6 @@ def render_header():
             cols.append("%s::%s::%s" % (key, val, id))
 
     ostream.write("\t".join(cols))
-    ostream.write("\n")
 
     return ostream.getvalue()
 
