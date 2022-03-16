@@ -38,34 +38,10 @@ def find_subrule_matches(doc):
     return matches
 
 
-def render_header(ostream: StringIO):
-    cols = [
-        "Path",
-        # "MD5",
-        # "SHA1",
-        "SHA256",
-        "OS",
-        "Format",
-        # "Architecture",
-        "ATT&CK Tactics",
-        "ATT&CK Techniques",
-        "MBC Objectives",
-        "MBC Behaviors",
-        "Capabilities"
-    ]
-
-    # Append headers for attacks and MBCs
-    for key, values in itertools.chain(ALL_ATTACK.items(), ALL_MBC.items()):
-        for id, val in values.items():
-            cols.append("%s::%s::%s" % (key, val, id))
-
-    ostream.write("\t".join(cols))
-    ostream.write("\n")
-
-
 def render_meta(doc, ostream: StringIO):
     cols = [
         doc["meta"]["sample"]["path"],
+        "0 - OK",  # no error
         # doc["meta"]["sample"]["md5"],
         # doc["meta"]["sample"]["sha1"],
         doc["meta"]["sample"]["sha256"],
@@ -79,6 +55,9 @@ def render_meta(doc, ostream: StringIO):
 
 
 def get_total_numbers(items: dict):
+    """
+    return the total number of keys and values per key in `items` as pair (n_keys, n_values).
+    """
     # Count values of each key.
     total_values = 0
     for _, v in items.items():
@@ -105,6 +84,9 @@ def render_total_numbers(attack: dict, mbc: dict, capability: dict, ostream: Str
 
 
 def get_items(doc, key: str):
+    """
+    extract items by type specified by `key`, e.g. capability, att&ck, mbc.
+    """
     if key == "capability":
         subrule_matches = find_subrule_matches(doc)
 
@@ -137,6 +119,10 @@ def get_items(doc, key: str):
 
 def render_items(s_items: dict, all_items: Dict[str, Dict[str, str]], ostream: StringIO):
     """
+    args:
+        s_items (dict): the dictionary of capabilities belonging to the sample.
+        all_items (dict): the dictionary of all the reference capabilities (e.g. ATT&CK or MBC).
+        ostream (StringIO): the output stream to write the results to.
     example::
 
         key::root_val_1::child_val_1   key::root_val_1::child_val_2   [...]   key::root_val_2::child_val_1   key::root_val_2::child_val_2   [...]
@@ -159,15 +145,12 @@ def render_items(s_items: dict, all_items: Dict[str, Dict[str, str]], ostream: S
             ostream.write("\t")
 
 
-def render_csv(doc, has_header: bool):
+def render_csv(doc):
     ostream = rutils.StringIO()
 
     s_attack = get_items(doc, "att&ck")
     s_mbc = get_items(doc, "mbc")
     s_capability = get_items(doc, "capability")
-
-    if has_header:
-        render_header(ostream)
 
     render_meta(doc, ostream)
     render_total_numbers(s_attack, s_mbc, s_capability, ostream)
@@ -177,6 +160,48 @@ def render_csv(doc, has_header: bool):
     return ostream.getvalue()
 
 
-def render(meta, rules: RuleSet, capabilities: MatchResults, has_header=False) -> str:
+def render_header():
+    ostream = rutils.StringIO()
+
+    cols = [
+        "Path",
+        "Error",
+        # "MD5",
+        # "SHA1",
+        "SHA256",
+        "OS",
+        "Format",
+        # "Architecture",
+        "ATT&CK Tactics",
+        "ATT&CK Techniques",
+        "MBC Objectives",
+        "MBC Behaviors",
+        "Capabilities"
+    ]
+
+    # Append headers for attacks and MBCs
+    for key, values in itertools.chain(ALL_ATTACK.items(), ALL_MBC.items()):
+        for id, val in values.items():
+            cols.append("%s::%s::%s" % (key, val, id))
+
+    ostream.write("\t".join(cols))
+
+    return ostream.getvalue()
+
+
+def render_error(code: int, msg: str, path: str):
+    ostream = rutils.StringIO()
+
+    cols = [
+        path,
+        "%s - %s" % (str(code), msg)
+    ]
+
+    ostream.write("\t".join(cols))
+
+    return ostream.getvalue()
+
+
+def render(meta, rules: RuleSet, capabilities: MatchResults) -> str:
     doc = capa.render.result_document.convert_capabilities_to_result_document(meta, rules, capabilities)
-    return render_csv(doc, has_header)
+    return render_csv(doc)
