@@ -919,7 +919,7 @@ def log_error(code: int, msg: str, path: str, timestamp: int, csv: bool):
     log any type of error indicated by its `code` and `msg`.
     if the CSV flag is set, write the error to the CSV report.
     """
-    logger.error(" %s", msg)
+    logger.error("Code %s - %s", str(code), msg)
     if csv:
         write_csv(capa.render.csv.render_error(code, msg, path), timestamp)
 
@@ -965,21 +965,22 @@ def analyze_sample(args, sample: str, rules: RuleSet) -> Tuple[int, str, Dict[st
         try:
             file_extractor = capa.features.extractors.pefile.PefileFeatureExtractor(sample)
         except PEFormatError as e:
-            return (E_CORRUPT_FILE, "Input file '%s' is not a valid PE file: %s" % (sample, str(e)), None, None)
+            return (E_CORRUPT_FILE, "Input file is not a valid PE file: %s" % str(e), None, None)
 
     elif args.format == "elf" or (args.format == "auto" and taste.startswith(b"\x7fELF")):
         try:
             file_extractor = capa.features.extractors.elffile.ElfFeatureExtractor(sample)
         except (ELFError, OverflowError) as e:
-            return (E_CORRUPT_FILE, "Input file '%s' is not a valid ELF file: %s" % (sample, str(e)), None, None)
+            return (E_CORRUPT_FILE, "Input file is not a valid ELF file: %s" % str(e), None, None)
 
     if file_extractor:
         try:
             pure_file_capabilities, _ = find_file_capabilities(rules, file_extractor, {})
         except PEFormatError as e:
-            return (E_CORRUPT_FILE, "Input file '%s' is not a valid PE file: %s" % (sample, str(e)), None, None)
+            return (E_CORRUPT_FILE, "Input file is not a valid PE file: %s" % str(e), None, None)
         except (ELFError, OverflowError) as e:
-            return (E_CORRUPT_FILE, "Input file '%s' is not a valid ELF file: %s" % (sample, str(e)), None, None)
+            logger.error()
+            return (E_CORRUPT_FILE, "Input file is not a valid ELF file: %s" % str(e), None, None)
 
         # file limitations that rely on non-file scope won't be detected here.
         # nor on FunctionName features, because pefile doesn't support this.
@@ -988,7 +989,7 @@ def analyze_sample(args, sample: str, rules: RuleSet) -> Tuple[int, str, Dict[st
             # do show the output in verbose mode, though.
             if not (args.verbose or args.vverbose or args.json):
                 logger.debug("file limitation short circuit, won't analyze fully.")
-                return (E_FILE_LIMITATION, "File limitation: won't analyze input file '%s' fully" % sample, None, None)
+                return (E_FILE_LIMITATION, "File limitation: won't analyze input file fully", None, None)
 
     try:
         if args.format == "pe" or (args.format == "auto" and taste.startswith(b"MZ")):
@@ -1056,7 +1057,7 @@ def analyze_sample(args, sample: str, rules: RuleSet) -> Tuple[int, str, Dict[st
         # bail if capa encountered file limitation e.g. a packed binary
         # do show the output in verbose mode, though.
         if not (args.verbose or args.vverbose or args.json):
-            return (E_FILE_LIMITATION, "File limitation: won't analyze input file '%s' fully" % sample, None, None)
+            return (E_FILE_LIMITATION, "File limitation: won't analyze input file fully", None, None)
 
     return (0, "OK", meta, capabilities)
 
@@ -1196,15 +1197,17 @@ def main(argv=None):
             # Abort the analysis (e.g. after timeout or it might take too long) by catching the first exception
             skip_timeout.set()
             spinner.fail("analysis aborted")
-            log_error(E_ABORT_TIMEOUT, "Analysis aborted or timed out: '%s'" % sample, sample, analysis_ts, args.csv)
+            log_error(E_ABORT_TIMEOUT, "Analysis aborted or timed out", sample, analysis_ts, args.csv)
 
             # Give the user time to quit the program by hitting the keys again.
             spinner.start("waiting 5 seconds to continue (press Ctrl+C again to quit)")
             time.sleep(5)
         except UnicodeDecodeError as e:
             skip_timeout.set()
-            log_error(E_INVALID_DECODE, "Input file '%s' cannot be decoded properly: %s" %
-                      (sample, str(e)), sample, analysis_ts, args.csv)
+            log_error(
+                E_INVALID_DECODE,
+                "Input file cannot be decoded properly: %s" % str(e), sample, analysis_ts, args.csv
+            )
         finally:
             thread.join()
             spinner.info("analysis time: %s" % time.strftime("%H:%M:%S", time.gmtime(time.time() - start_time)))

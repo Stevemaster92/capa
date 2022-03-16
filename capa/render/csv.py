@@ -194,7 +194,7 @@ def render_error(code: int, msg: str, path: str):
 
     cols = [
         path,
-        "%s - %s" % (str(code), msg)
+        msg
     ]
 
     ostream.write("\t".join(cols))
