@@ -1207,11 +1207,7 @@ def main(argv=None):
                       (sample, str(e)), sample, analysis_ts, args.csv)
         finally:
             thread.join()
-            elapsed = int(time.time() - start_time)
-            spinner.info(
-                "analysis time: %d %s(s)" %
-                (elapsed if elapsed < 60 else elapsed / 60, "second" if elapsed < 60 else "minute")
-            )
+            spinner.info("analysis time: %s" % time.strftime("%H:%M:%S", time.gmtime(time.time() - start_time)))
 
         samples_done += 1
         spinner.succeed("%s of %s samples done" % (samples_done, total_samples))
