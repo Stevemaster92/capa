@@ -171,12 +171,14 @@ The [capa-testfiles repository](https://github.com/mandiant/capa-testfiles) cont
 
 # changes to original repository
 
-Compared to the features from the original [capa repository](https://github.com/mandiant/capa), I have implemented some Quality-of-Life addons and made minor changes (e.g. improve code readability).
+Compared to the features from the original [capa repository](https://github.com/mandiant/capa), I have implemented some quality-of-life addons and made minor changes (e.g. improve code readability).
 
 Check out:
 
 -   [analyze directories](#analyze-directories)
 -   [analysis timeout](#analysis-timeout)
+-   [analysis time](#analysis-time)
+-   [abort analysis](#abort-analysis)
 -   [CSV report](#csv-report)
 -   [LOG file export](#log-file-export)
 
@@ -199,6 +201,18 @@ Here's an example on how to set the analysis timeout to 30 minutes:
 ```
 capa.exe --timeout 30 suspicious.exe
 ```
+
+## analysis time
+
+The time that the analysis of a sample took is shown at the end of the result in the format `%H:%M:%S`.
+
+```
+i  analysis time: 00:04:20
+```
+
+## abort analysis
+
+Besides the [analysis timeout](#analysis-timeout), the user is able to _gracefully abort_ the current analysis of a sample by pressing `Ctrl+C` on the keyboard. This fires a `SIGINT` signal and raises the `KeyboardInterrupt` exception in the main thread. After that, capa gives the user _5 seconds_ to hit `Ctrl+C` again in order to quit the program. Otherwise, capa will continue the analysis with the next sample in the queue or terminates the program if there is no sample.
 
 ## CSV report
 
