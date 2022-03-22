@@ -1220,8 +1220,9 @@ def main(argv=None):
         spinner.succeed("%s of %s samples done" % (samples_done, total_samples))
 
         # Force garbage collection.
-        spinner.start("cleaning up '%s'" % sample)
-        gc.collect()
+        if samples_done < total_samples:
+            spinner.info("cleaning up '%s'" % sample)
+            gc.collect()
 
     colorama.deinit()
 
