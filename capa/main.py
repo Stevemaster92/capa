@@ -1095,7 +1095,10 @@ def render_result(args, sample: str, meta, rules: RuleSet, capabilities: MatchRe
 
 
 def clog_exists(sample: str):
-    clog_pattern = "^%s-\d+.clog$" % os.path.splitext(os.path.basename(sample))[0]
+    clog_pattern = "^%s*.clog$" % os.path.splitext(os.path.basename(sample))[0]
+
+    if re.search(clog_pattern, sample):
+        return True
 
     with os.scandir(os.path.dirname(sample)) as files:
         for f in files:
