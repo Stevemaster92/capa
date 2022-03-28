@@ -1094,6 +1094,16 @@ def render_result(args, sample: str, meta, rules: RuleSet, capabilities: MatchRe
             file.write(ANSI_ESCAPE.sub("", result))
 
 
+def clog_exists(sample: str):
+    clog_pattern = "^%s-\d+.clog$" % os.path.splitext(os.path.basename(sample))[0]
+
+    with os.scandir(os.path.dirname(sample)) as files:
+        for f in files:
+            if re.search(clog_pattern, f.name):
+                return True
+    return False
+
+
 def main(argv=None):
     if sys.version_info < (3, 6):
         raise UnsupportedRuntimeError("This version of capa can only be used with Python 3.6+")
@@ -1178,51 +1188,54 @@ def main(argv=None):
     samples_done = 0
     total_samples = len(samples)
     for sample in samples:
-        spinner.info("analyzing '%s' (press Ctrl+C to abort)" % sample)
+        if clog_exists(sample):
+            spinner.info("skipping '%s' as log file exists" % sample)
+        else:
+            spinner.info("analyzing '%s' (press Ctrl+C to abort)" % sample)
 
-        # Prepare timeout event.
-        skip_timeout.clear()
-        thread = TimeoutThread(timeout, skip_timeout)
-        thread.start()
+            # Prepare timeout event.
+            skip_timeout.clear()
+            thread = TimeoutThread(timeout, skip_timeout)
+            thread.start()
 
-        start_time = time.time()
-        try:
-            ret, msg, meta, capabilities = analyze_sample(args, sample, rules)
-            skip_timeout.set()
+            start_time = time.time()
+            try:
+                ret, msg, meta, capabilities = analyze_sample(args, sample, rules)
+                skip_timeout.set()
 
-            if ret != 0:
-                log_error(ret, msg, sample, analysis_ts, args.csv)
-            else:
-                render_result(args, sample, meta, rules, capabilities, analysis_ts)
-        except KeyboardInterrupt:
-            # Abort the analysis (e.g. after timeout or it might take too long) by catching the first exception
-            skip_timeout.set()
-            spinner.fail("analysis aborted")
-            log_error(E_ABORT_TIMEOUT, "Analysis aborted or timed out", sample, analysis_ts, args.csv)
+                if ret != 0:
+                    log_error(ret, msg, sample, analysis_ts, args.csv)
+                else:
+                    render_result(args, sample, meta, rules, capabilities, analysis_ts)
+            except KeyboardInterrupt:
+                # Abort the analysis (e.g. after timeout or it might take too long) by catching the first exception
+                skip_timeout.set()
+                spinner.fail("analysis aborted")
+                log_error(E_ABORT_TIMEOUT, "Analysis aborted or timed out", sample, analysis_ts, args.csv)
 
-            # Give the user time to quit the program by hitting the keys again.
-            spinner.start("waiting 5 seconds to continue (press Ctrl+C again to quit)")
-            time.sleep(5)
-        except UnicodeDecodeError as e:
-            skip_timeout.set()
-            log_error(
-                E_INVALID_UNICODE,
-                "Input file cannot be decoded properly: %s" % str(e), sample, analysis_ts, args.csv
-            )
-        except Exception as e:
-            skip_timeout.set()
-            log_error(E_UNKNOWN, "Unknown error: %s" % str(e), sample, analysis_ts, args.csv)
-        finally:
-            thread.join()
-            spinner.info("analysis time: %s" % time.strftime("%H:%M:%S", time.gmtime(time.time() - start_time)))
+                # Give the user time to quit the program by hitting the keys again.
+                spinner.start("waiting 5 seconds to continue (press Ctrl+C again to quit)")
+                time.sleep(5)
+            except UnicodeDecodeError as e:
+                skip_timeout.set()
+                log_error(
+                    E_INVALID_UNICODE,
+                    "Input file cannot be decoded properly: %s" % str(e), sample, analysis_ts, args.csv
+                )
+            except Exception as e:
+                skip_timeout.set()
+                log_error(E_UNKNOWN, "Unknown error: %s" % str(e), sample, analysis_ts, args.csv)
+            finally:
+                thread.join()
+                spinner.info("analysis time: %s" % time.strftime("%H:%M:%S", time.gmtime(time.time() - start_time)))
 
         samples_done += 1
         spinner.succeed("%s of %s samples done" % (samples_done, total_samples))
 
         # Force garbage collection.
-        if samples_done < total_samples:
-            spinner.info("cleaning up '%s'" % sample)
-            gc.collect()
+        # if samples_done < total_samples:
+        #     spinner.info("cleaning up '%s'" % sample)
+        #     gc.collect()
 
     colorama.deinit()
 
