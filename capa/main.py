@@ -1095,15 +1095,19 @@ def render_result(args, sample: str, meta, rules: RuleSet, capabilities: MatchRe
 
 
 def clog_exists(sample: str):
-    clog_pattern = "^%s*.clog$" % os.path.splitext(os.path.basename(sample))[0]
+    root, ext = os.path.splitext(os.path.basename(sample))
 
-    if re.search(clog_pattern, sample):
+    # Skip log file.
+    if ext == ".clog":
         return True
+
+    clog_pattern = "^%s.*\.clog$" % root
 
     with os.scandir(os.path.dirname(sample)) as files:
         for f in files:
             if re.search(clog_pattern, f.name):
                 return True
+
     return False
 
 
@@ -1232,13 +1236,13 @@ def main(argv=None):
                 thread.join()
                 spinner.info("analysis time: %s" % time.strftime("%H:%M:%S", time.gmtime(time.time() - start_time)))
 
+            # Force garbage collection.
+            if samples_done < total_samples:
+                spinner.info("cleaning up '%s'" % sample)
+                gc.collect()
+
         samples_done += 1
         spinner.succeed("%s of %s samples done" % (samples_done, total_samples))
-
-        # Force garbage collection.
-        # if samples_done < total_samples:
-        #     spinner.info("cleaning up '%s'" % sample)
-        #     gc.collect()
 
     colorama.deinit()
 
