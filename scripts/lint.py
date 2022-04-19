@@ -41,6 +41,7 @@ import tqdm.contrib.logging
 import capa.main
 import capa.rules
 import capa.engine
+import capa.helpers
 import capa.features.insn
 import capa.features.common
 from capa.rules import Rule, RuleSet
@@ -161,10 +162,10 @@ class MissingScope(Lint):
 
 class InvalidScope(Lint):
     name = "invalid scope"
-    recommendation = "Use only file, function, or basic block rule scopes"
+    recommendation = "Use only file, function, basic block, or instruction rule scopes"
 
     def check_rule(self, ctx: Context, rule: Rule):
-        return rule.meta.get("scope") not in ("file", "function", "basic block")
+        return rule.meta.get("scope") not in ("file", "function", "basic block", "instruction")
 
 
 class MissingAuthor(Lint):
@@ -247,7 +248,7 @@ class InvalidAttckOrMbcTechnique(Lint):
             self.enabled_frameworks = []
 
         # This regex matches the format defined in the recommendation attribute
-        self.reg = re.compile("^([\w\s-]+)::(.+) \[([A-Za-z0-9.]+)\]$")
+        self.reg = re.compile(r"^([\w\s-]+)::(.+) \[([A-Za-z0-9.]+)\]$")
 
     def _entry_check(self, framework, category, entry, eid):
         if category not in self.data[framework].keys():
@@ -286,16 +287,16 @@ def get_sample_capabilities(ctx: Context, path: Path) -> Set[str]:
         logger.debug("found cached results: %s: %d capabilities", nice_path, len(ctx.capabilities_by_sample[path]))
         return ctx.capabilities_by_sample[path]
 
-    if nice_path.endswith(capa.main.EXTENSIONS_SHELLCODE_32):
-        format = "sc32"
-    elif nice_path.endswith(capa.main.EXTENSIONS_SHELLCODE_64):
-        format = "sc64"
+    if nice_path.endswith(capa.helpers.EXTENSIONS_SHELLCODE_32):
+        format_ = "sc32"
+    elif nice_path.endswith(capa.helpers.EXTENSIONS_SHELLCODE_64):
+        format_ = "sc64"
     else:
-        format = "auto"
+        format_ = "auto"
 
     logger.debug("analyzing sample: %s", nice_path)
     extractor = capa.main.get_extractor(
-        nice_path, format, capa.main.BACKEND_VIV, DEFAULT_SIGNATURES, False, disable_progress=True
+        nice_path, format_, capa.main.BACKEND_VIV, DEFAULT_SIGNATURES, False, disable_progress=True
     )
 
     capabilities, _ = capa.main.find_capabilities(ctx.rules, extractor, disable_progress=True)
@@ -962,7 +963,7 @@ def main(argv=None):
 
     parser = argparse.ArgumentParser(description="Lint capa rules.")
     capa.main.install_common_args(parser, wanted={"tag"})
-    parser.add_argument("rules", type=str, help="Path to rules")
+    parser.add_argument("rules", type=str, action="append", help="Path to rules")
     parser.add_argument("--samples", type=str, default=samples_path, help="Path to samples")
     parser.add_argument(
         "--thorough",

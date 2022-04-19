@@ -122,3 +122,8 @@ scripts/perf/*.zip
 # Generated output files
 *.csv
 *.clog
+
+.direnv
+.envrc
+.DS_Store
+*/.DS_Store

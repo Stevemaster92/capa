@@ -85,10 +85,18 @@ def get_file_imports():
         if not library:
             continue
 
+        # IDA uses section names for the library of ELF imports, like ".dynsym"
+        library = library.lstrip(".")
+
         def inspect_import(ea, function, ordinal):
             if function and function.startswith("__imp_"):
-                # handle mangled names starting
+                # handle mangled PE imports
                 function = function[len("__imp_") :]
+
+            if function and "@@" in function:
+                # handle mangled ELF imports, like "fopen@@glibc_2.2.5"
+                function, _, _ = function.partition("@@")
+
             imports[ea] = (library.lower(), function, ordinal)
             return True
 
@@ -374,3 +382,8 @@ def get_function_blocks(f):
 def is_basic_block_return(bb):
     """check if basic block is return block"""
     return bb.type == idaapi.fcb_ret
+
+
+def has_sib(oper) -> bool:
+    # via: https://reverseengineering.stackexchange.com/a/14300
+    return oper.specflag1 == 1

@@ -11,7 +11,7 @@ import os
 import setuptools
 
 requirements = [
-    "tqdm==4.63.0",
+    "tqdm==4.64.0",
     "pyyaml==6.0",
     "tabulate==0.8.9",
     "colorama==0.4.4",
@@ -23,9 +23,11 @@ requirements = [
     "networkx==2.5.1",
     "ruamel.yaml==0.17.21",
     "vivisect==1.0.7",
-    "smda==1.7.0",
+    "smda==1.7.1",
     "pefile==2021.9.3",
     "pyelftools==0.28",
+    "dnfile==0.10.0",
+    "dncil==1.0.0",
 ]
 
 # this sets __version__
@@ -66,25 +68,25 @@ setuptools.setup(
     install_requires=requirements,
     extras_require={
         "dev": [
-            "pytest==7.0.1",
+            "pytest==7.1.1",
             "pytest-sugar==0.9.4",
             "pytest-instafail==0.4.2",
             "pytest-cov==3.0.0",
             "pycodestyle==2.8.0",
-            "black==22.1.0",
+            "black==22.3.0",
             "isort==5.10.1",
-            "mypy==0.940",
+            "mypy==0.942",
             "psutil==5.9.0",
             "stix2==3.0.1",
             "requests==2.27.1",
             # type stubs for mypy
             "types-backports==0.1.3",
-            "types-colorama==0.4.8",
-            "types-PyYAML==6.0.4",
-            "types-tabulate==0.8.5",
+            "types-colorama==0.4.10",
+            "types-PyYAML==6.0.5",
+            "types-tabulate==0.8.6",
             "types-termcolor==1.1.3",
             "types-psutil==5.8.20",
-            "types_requests==2.27.12",
+            "types_requests==2.27.16",
         ],
     },
     zip_safe=False,
@@ -98,5 +100,5 @@ setuptools.setup(
         "Programming Language :: Python :: 3",
         "Topic :: Security",
     ],
-    python_requires=">=3.6",
+    python_requires=">=3.7",
 )
