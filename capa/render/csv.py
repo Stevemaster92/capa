@@ -41,7 +41,7 @@ def find_subrule_matches(doc):
 def render_meta(doc, ostream: StringIO):
     cols = [
         doc["meta"]["sample"]["path"],
-        "0 - OK",  # no error
+        "OK",  # no error
         # doc["meta"]["sample"]["md5"],
         # doc["meta"]["sample"]["sha1"],
         doc["meta"]["sample"]["sha256"],
