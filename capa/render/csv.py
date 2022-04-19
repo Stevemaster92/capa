@@ -7,7 +7,7 @@ import capa.render.utils as rutils
 from capa.engine import MatchResults
 from capa.rules import RuleSet
 from capa.render.utils import StringIO
-from capa.knowledge import ALL_ATTACK, ALL_MBC
+from capa.knowledge import ALL_ATTACK, ALL_MBC, VERDICTS
 
 
 def find_subrule_matches(doc):
@@ -82,6 +82,31 @@ def render_total_numbers(attack: dict, mbc: dict, capability: dict, ostream: Str
     ostream.write("\t".join(cols))
     ostream.write("\t")
 
+def get_verdict(items: dict):
+    verdict = ""
+
+    for key, values in items.items():
+        for (_, _, id) in values:
+            search = "%s::%s" % (key, id)
+
+            if search in VERDICTS["malicious"]:
+                # Immediately return if a malicious ID is found.
+                return "MALICIOUS"
+            if search in VERDICTS["suspicious"]:
+                # Store a SUSPICIOUS verdict which could be replaced by a malicious one.
+                verdict = "SUSPICIOUS"
+
+    # This either returns an empty or SUSPICIOUS verdict.
+    return verdict
+
+def render_verdict(attack: dict, mbc: dict, ostream: StringIO):
+    verdict = get_verdict(attack)
+
+    if verdict == "":
+        verdict = get_verdict(mbc)
+
+    ostream.write(verdict)
+    ostream.write("\t")
 
 def get_items(doc, key: str):
     """
@@ -132,17 +157,20 @@ def render_items(s_items: dict, all_items: Dict[str, Dict[str, str]], ostream: S
     for key, values in all_items.items():
         s_values = s_items[key]
 
-        for id, val in values.items():
-            if s_values is None:
-                ostream.write(str(0))
-            else:
-                found = False
-                for (s_root, s_child, s_id) in s_values:
-                    if id in s_id:
-                        found = True
-                        break
-                ostream.write(str(1)) if found else ostream.write(str(0))
-            ostream.write("\t")
+        for id, _ in values.items():
+            search = "%s::%s" % (key, id)
+
+            if search in VERDICTS["malicious"] or search in VERDICTS["suspicious"]:
+                if s_values is None:
+                    ostream.write(str(0))
+                else:
+                    found = False
+                    for (_, _, s_id) in s_values:
+                        if id in s_id:
+                            found = True
+                            break
+                    ostream.write(str(1)) if found else ostream.write(str(0))
+                ostream.write("\t")
 
 
 def render_csv(doc):
@@ -154,6 +182,7 @@ def render_csv(doc):
 
     render_meta(doc, ostream)
     render_total_numbers(s_attack, s_mbc, s_capability, ostream)
+    render_verdict(s_attack, s_mbc, ostream)
     render_items(s_attack, ALL_ATTACK, ostream)
     render_items(s_mbc, ALL_MBC, ostream)
 
@@ -176,13 +205,17 @@ def render_header():
         "ATT&CK Techniques",
         "MBC Objectives",
         "MBC Behaviors",
-        "Capabilities"
+        "Capabilities",
+        "Verdict"
     ]
 
-    # Append headers for attacks and MBCs
+    # Append headers for attacks and MBCs with a verdict.
     for key, values in itertools.chain(ALL_ATTACK.items(), ALL_MBC.items()):
         for id, val in values.items():
-            cols.append("%s::%s::%s" % (key, val, id))
+            search = "%s::%s" % (key, id)
+
+            if search in VERDICTS["malicious"] or search in VERDICTS["suspicious"]:
+                cols.append("%s::%s::%s" % (key, val, id))
 
     ostream.write("\t".join(cols))
 
