@@ -4,16 +4,34 @@
 
 ### New Features
 
+ - add new scope "instruction" for matching mnemonics and operands #767 @williballenthin
+ - add new feature "operand[{0, 1, 2}].number" for matching instruction operand immediate values #767 @williballenthin
+ - add new feature "operand[{0, 1, 2}].offset" for matching instruction operand offsets #767 @williballenthin
+ - extract additional offset/number features in certain circumstances #320 @williballenthin
+ - add detection and basic feature extraction for dotnet #987 @mr-tz, @mike-hunhoff, @williballenthin
+
 ### Breaking Changes
 
-### New Rules (1)
+  - instruction scope and operand feature are new and are not backwards compatible with older versions of capa
+  - Python 3.7 is now the minimum supported Python version #866 @williballenthin
+  - remove /x32 and /x64 flavors of number and operand features #932 @williballenthin
+  - the tool now accepts multiple paths to rules, and JSON doc updated accordingly @williballenthin
+
+### New Rules (5)
 
 - data-manipulation/encryption/aes/manually-build-aes-constants huynh.t.nhan@gmail.com
+- nursery/get-process-image-filename michael.hunhoff@mandiant.com
+- compiler/v/compiled-with-v jakub.jozwiak@mandiant.com
+- compiler/zig/compiled-with-zig jakub.jozwiak@mandiant.com
+- anti-analysis/packer/huan/packed-with-huan jakub.jozwiak@mandiant.com
 -
 
 ### Bug Fixes
+- improve handling _ prefix compile/link artifact #924 @mike-hunhoff
 
 ### capa explorer IDA Pro plugin
+- improve file format extraction #918 @mike-hunhoff
+- remove decorators added by IDA to ELF imports #919 @mike-hunhoff
 
 ### Development
 

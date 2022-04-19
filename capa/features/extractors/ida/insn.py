@@ -12,38 +12,12 @@ import idautils
 
 import capa.features.extractors.helpers
 import capa.features.extractors.ida.helpers
-from capa.features.insn import API, Number, Offset, Mnemonic
-from capa.features.common import (
-    BITNESS_X32,
-    BITNESS_X64,
-    MAX_BYTES_FEATURE_SIZE,
-    THUNK_CHAIN_DEPTH_DELTA,
-    Bytes,
-    String,
-    Characteristic,
-)
+from capa.features.insn import API, MAX_STRUCTURE_SIZE, Number, Offset, Mnemonic, OperandNumber, OperandOffset
+from capa.features.common import MAX_BYTES_FEATURE_SIZE, THUNK_CHAIN_DEPTH_DELTA, Bytes, String, Characteristic
 
 # security cookie checks may perform non-zeroing XORs, these are expected within a certain
 # byte range within the first and returning basic blocks, this helps to reduce FP features
 SECURITY_COOKIE_BYTES_DELTA = 0x40
-
-
-def get_bitness(ctx):
-    """
-    fetch the BITNESS_* constant for the currently open workspace.
-
-    via Tamir Bahar/@tmr232
-    https://reverseengineering.stackexchange.com/a/11398/17194
-    """
-    if "bitness" not in ctx:
-        info = idaapi.get_inf_structure()
-        if info.is_64bit():
-            ctx["bitness"] = BITNESS_X64
-        elif info.is_32bit():
-            ctx["bitness"] = BITNESS_X32
-        else:
-            raise ValueError("unexpected bitness")
-    return ctx["bitness"]
 
 
 def get_imports(ctx):
@@ -114,6 +88,12 @@ def extract_insn_api_features(f, bb, insn):
     if target_func.flags & idaapi.FUNC_LIB:
         name = idaapi.get_name(target_func.start_ea)
         yield API(name), insn.ea
+        if name.startswith("_"):
+            # some linkers may prefix linked routines with a `_` to avoid name collisions.
+            # extract features for both the mangled and un-mangled representations.
+            # e.g. `_fwrite` -> `fwrite`
+            # see: https://stackoverflow.com/a/2628384/87207
+            yield API(name[1:]), insn.ea
 
 
 def extract_insn_number_features(f, bb, insn):
@@ -137,7 +117,11 @@ def extract_insn_number_features(f, bb, insn):
         #   .text:00401145 add esp, 0Ch
         return
 
-    for op in capa.features.extractors.ida.helpers.get_insn_ops(insn, target_ops=(idaapi.o_imm, idaapi.o_mem)):
+    for i, op in enumerate(insn.ops):
+        if op.type == idaapi.o_void:
+            break
+        if op.type not in (idaapi.o_imm, idaapi.o_mem):
+            continue
         # skip things like:
         #   .text:00401100 shr eax, offset loc_C
         if capa.features.extractors.ida.helpers.is_op_offset(insn, op):
@@ -149,7 +133,16 @@ def extract_insn_number_features(f, bb, insn):
             const = op.addr
 
         yield Number(const), insn.ea
-        yield Number(const, bitness=get_bitness(f.ctx)), insn.ea
+        yield OperandNumber(i, const), insn.ea
+
+        if insn.itype == idaapi.NN_add and 0 < const < MAX_STRUCTURE_SIZE and op.type == idaapi.o_imm:
+            # for pattern like:
+            #
+            #     add eax, 0x10
+            #
+            # assume 0x10 is also an offset (imagine eax is a pointer).
+            yield Offset(const), insn.ea
+            yield OperandOffset(i, const), insn.ea
 
 
 def extract_insn_bytes_features(f, bb, insn):
@@ -202,9 +195,14 @@ def extract_insn_offset_features(f, bb, insn):
     example:
         .text:0040112F cmp [esi+4], ebx
     """
-    for op in capa.features.extractors.ida.helpers.get_insn_ops(insn, target_ops=(idaapi.o_phrase, idaapi.o_displ)):
+    for i, op in enumerate(insn.ops):
+        if op.type == idaapi.o_void:
+            break
+        if op.type not in (idaapi.o_phrase, idaapi.o_displ):
+            continue
         if capa.features.extractors.ida.helpers.is_op_stack_var(insn.ea, op.n):
             continue
+
         p_info = capa.features.extractors.ida.helpers.get_op_phrase_info(op)
         op_off = p_info.get("offset", 0)
         if idaapi.is_mapped(op_off):
@@ -218,7 +216,26 @@ def extract_insn_offset_features(f, bb, insn):
         op_off = capa.features.extractors.helpers.twos_complement(op_off, 32)
 
         yield Offset(op_off), insn.ea
-        yield Offset(op_off, bitness=get_bitness(f.ctx)), insn.ea
+        yield OperandOffset(i, op_off), insn.ea
+
+        if (
+            insn.itype == idaapi.NN_lea
+            and i == 1
+            # o_displ is used for both:
+            #   [eax+1]
+            #   [eax+ebx+2]
+            and op.type == idaapi.o_displ
+            # but the SIB is only present for [eax+ebx+2]
+            # which we don't want
+            and not capa.features.extractors.ida.helpers.has_sib(op)
+        ):
+            # for pattern like:
+            #
+            #     lea eax, [ebx + 1]
+            #
+            # assume 1 is also an offset (imagine ebx is a zero register).
+            yield Number(op_off), insn.ea
+            yield OperandNumber(i, op_off), insn.ea
 
 
 def contains_stack_cookie_keywords(s):
