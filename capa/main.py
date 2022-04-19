@@ -1237,9 +1237,8 @@ def main(argv=None):
                 spinner.info("analysis time: %s" % time.strftime("%H:%M:%S", time.gmtime(time.time() - start_time)))
 
             # Force garbage collection.
-            if samples_done < total_samples:
-                spinner.info("cleaning up '%s'" % sample)
-                gc.collect()
+            spinner.info("cleaning up '%s'" % sample)
+            gc.collect()
 
         samples_done += 1
         spinner.succeed("%s of %s samples done" % (samples_done, total_samples))
