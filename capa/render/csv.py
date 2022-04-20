@@ -94,7 +94,8 @@ def get_verdict(items: dict):
 
     for key, values in items.items():
         for (_, _, id) in values:
-            search = "%s::%s" % (key, id)
+            # Trim the ID if it contains a subtechnique. Otherwise, the following checks won't work.
+            search = "%s::%s" % (key, str(id).split(".")[0])
 
             if search in VERDICTS["malicious"]:
                 # Immediately return if a malicious ID is found.
