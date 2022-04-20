@@ -186,6 +186,25 @@ def render_items(s_items: dict, all_items: Dict[str, Dict[str, str]], ostream: S
                 ostream.write("\t")
 
 
+def render_others(attack: dict, mbc: dict, ostream: StringIO):
+    others = []
+
+    for key, values in itertools.chain(attack.items(), mbc.items()):
+        for (val, _, id) in values:
+            # Trim the ID if it contains a subtechnique. Otherwise, the following checks won't work.
+            search = "%s::%s" % (key, str(id).split(".")[0])
+
+            # Add all entries which are neither malicious nor suspicious to the list.
+            if search in VERDICTS["malicious"] or search in VERDICTS["suspicious"]:
+                continue
+            else:
+                others.append("%s::%s::%s" % (key, val, id))
+
+    ostream.write(str(len(others)))
+    ostream.write("\t")
+    ostream.write(", ".join(others))
+
+
 def render_csv(doc):
     ostream = rutils.StringIO()
 
@@ -198,6 +217,7 @@ def render_csv(doc):
     render_verdict(s_attack, s_mbc, ostream)
     render_items(s_attack, ALL_ATTACK, ostream)
     render_items(s_mbc, ALL_MBC, ostream)
+    render_others(s_attack, s_mbc, ostream)
 
     return ostream.getvalue()
 
@@ -229,6 +249,10 @@ def render_header():
 
             if search in VERDICTS["malicious"] or search in VERDICTS["suspicious"]:
                 cols.append("%s::%s::%s" % (key, val, id))
+
+    # Append headers for the summary of the remaining attacks and MBCs.
+    cols.append("Others Sum")
+    cols.append("Others")
 
     ostream.write("\t".join(cols))
 
