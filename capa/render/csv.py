@@ -9,6 +9,10 @@ from capa.rules import RuleSet
 from capa.render.utils import StringIO
 from capa.knowledge import ALL_ATTACK, ALL_MBC, VERDICTS
 
+V_NONE = 0
+V_MALICIOUS = 1
+V_SUSPICIOUS = 2
+V_TERMS = ["NONE", "MALICIOUS", "SUSPICIOUS"]
 
 def find_subrule_matches(doc):
     """
@@ -83,7 +87,10 @@ def render_total_numbers(attack: dict, mbc: dict, capability: dict, ostream: Str
     ostream.write("\t")
 
 def get_verdict(items: dict):
-    verdict = ""
+    """
+    return the verdict determined from the entries in `items`.
+    """
+    verdict = V_NONE
 
     for key, values in items.items():
         for (_, _, id) in values:
@@ -91,21 +98,26 @@ def get_verdict(items: dict):
 
             if search in VERDICTS["malicious"]:
                 # Immediately return if a malicious ID is found.
-                return "MALICIOUS"
+                return V_MALICIOUS
             if search in VERDICTS["suspicious"]:
-                # Store a SUSPICIOUS verdict which could be replaced by a malicious one.
-                verdict = "SUSPICIOUS"
+                # Store the SUSPICIOUS verdict which could be replaced by a malicious one later on.
+                verdict = V_SUSPICIOUS
 
-    # This either returns an empty or SUSPICIOUS verdict.
+    # This either returns NONE or SUSPICIOUS.
     return verdict
 
 def render_verdict(attack: dict, mbc: dict, ostream: StringIO):
     verdict = get_verdict(attack)
 
-    if verdict == "":
-        verdict = get_verdict(mbc)
+    # If verdict of ATT&CK is not already MALICIOUS, check verdict of MBC.
+    if verdict != V_MALICIOUS:
+        verdict_mbc = get_verdict(mbc)
 
-    ostream.write(verdict)
+        # Assign the new verdict only if it is MALICIOUS or SUSPICIOUS.
+        if verdict_mbc != V_NONE:
+            verdict = verdict_mbc
+
+    ostream.write(V_TERMS[verdict])
     ostream.write("\t")
 
 def get_items(doc, key: str):
