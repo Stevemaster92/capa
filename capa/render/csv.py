@@ -7,8 +7,12 @@ import capa.render.utils as rutils
 from capa.engine import MatchResults
 from capa.rules import RuleSet
 from capa.render.utils import StringIO
-from capa.knowledge import ALL_ATTACK, ALL_MBC
+from capa.knowledge import ALL_ATTACK, ALL_MBC, VERDICTS
 
+V_NONE = 0
+V_MALICIOUS = 1
+V_SUSPICIOUS = 2
+V_TERMS = ["NONE", "MALICIOUS", "SUSPICIOUS"]
 
 def find_subrule_matches(doc):
     """
@@ -42,12 +46,12 @@ def render_meta(doc, ostream: StringIO):
     cols = [
         doc["meta"]["sample"]["path"],
         "OK",  # no error
-        # doc["meta"]["sample"]["md5"],
-        # doc["meta"]["sample"]["sha1"],
+        doc["meta"]["sample"]["md5"],
+        doc["meta"]["sample"]["sha1"],
         doc["meta"]["sample"]["sha256"],
         doc["meta"]["analysis"]["os"],
         doc["meta"]["analysis"]["format"],
-        # doc["meta"]["analysis"]["arch"],
+        doc["meta"]["analysis"]["arch"],
     ]
 
     ostream.write("\t".join(cols))
@@ -82,6 +86,40 @@ def render_total_numbers(attack: dict, mbc: dict, capability: dict, ostream: Str
     ostream.write("\t".join(cols))
     ostream.write("\t")
 
+def get_verdict(items: dict):
+    """
+    return the verdict determined from the entries in `items`.
+    """
+    verdict = V_NONE
+
+    for key, values in items.items():
+        for (_, _, id) in values:
+            # Trim the ID if it contains a subtechnique. Otherwise, the following checks won't work.
+            search = "%s::%s" % (key, str(id).split(".")[0])
+
+            if search in VERDICTS["malicious"]:
+                # Immediately return if a malicious ID is found.
+                return V_MALICIOUS
+            if search in VERDICTS["suspicious"]:
+                # Store the SUSPICIOUS verdict which could be replaced by a malicious one later on.
+                verdict = V_SUSPICIOUS
+
+    # This either returns NONE or SUSPICIOUS.
+    return verdict
+
+def render_verdict(attack: dict, mbc: dict, ostream: StringIO):
+    verdict = get_verdict(attack)
+
+    # If verdict of ATT&CK is not already MALICIOUS, check verdict of MBC.
+    if verdict != V_MALICIOUS:
+        verdict_mbc = get_verdict(mbc)
+
+        # Assign the new verdict only if it is MALICIOUS or SUSPICIOUS.
+        if verdict_mbc != V_NONE:
+            verdict = verdict_mbc
+
+    ostream.write(V_TERMS[verdict])
+    ostream.write("\t")
 
 def get_items(doc, key: str):
     """
@@ -132,17 +170,39 @@ def render_items(s_items: dict, all_items: Dict[str, Dict[str, str]], ostream: S
     for key, values in all_items.items():
         s_values = s_items[key]
 
-        for id, val in values.items():
-            if s_values is None:
-                ostream.write(str(0))
+        for id, _ in values.items():
+            search = "%s::%s" % (key, id)
+
+            if search in VERDICTS["malicious"] or search in VERDICTS["suspicious"]:
+                if s_values is None:
+                    ostream.write(str(0))
+                else:
+                    found = False
+                    for (_, _, s_id) in s_values:
+                        if id in s_id:
+                            found = True
+                            break
+                    ostream.write(str(1)) if found else ostream.write(str(0))
+                ostream.write("\t")
+
+
+def render_others(attack: dict, mbc: dict, ostream: StringIO):
+    others = []
+
+    for key, values in itertools.chain(attack.items(), mbc.items()):
+        for (val, _, id) in values:
+            # Trim the ID if it contains a subtechnique. Otherwise, the following checks won't work.
+            search = "%s::%s" % (key, str(id).split(".")[0])
+
+            # Add all entries which are neither malicious nor suspicious to the list.
+            if search in VERDICTS["malicious"] or search in VERDICTS["suspicious"]:
+                continue
             else:
-                found = False
-                for (s_root, s_child, s_id) in s_values:
-                    if id in s_id:
-                        found = True
-                        break
-                ostream.write(str(1)) if found else ostream.write(str(0))
-            ostream.write("\t")
+                others.append("%s::%s::%s" % (key, val, id))
+
+    ostream.write(str(len(others)))
+    ostream.write("\t")
+    ostream.write(", ".join(others))
 
 
 def render_csv(doc):
@@ -154,8 +214,10 @@ def render_csv(doc):
 
     render_meta(doc, ostream)
     render_total_numbers(s_attack, s_mbc, s_capability, ostream)
+    render_verdict(s_attack, s_mbc, ostream)
     render_items(s_attack, ALL_ATTACK, ostream)
     render_items(s_mbc, ALL_MBC, ostream)
+    render_others(s_attack, s_mbc, ostream)
 
     return ostream.getvalue()
 
@@ -166,23 +228,31 @@ def render_header():
     cols = [
         "Path",
         "Error",
-        # "MD5",
-        # "SHA1",
+        "MD5",
+        "SHA1",
         "SHA256",
         "OS",
         "Format",
-        # "Architecture",
+        "Architecture",
         "ATT&CK Tactics",
         "ATT&CK Techniques",
         "MBC Objectives",
         "MBC Behaviors",
-        "Capabilities"
+        "Capabilities",
+        "Verdict"
     ]
 
-    # Append headers for attacks and MBCs
+    # Append headers for attacks and MBCs with a verdict.
     for key, values in itertools.chain(ALL_ATTACK.items(), ALL_MBC.items()):
         for id, val in values.items():
-            cols.append("%s::%s::%s" % (key, val, id))
+            search = "%s::%s" % (key, id)
+
+            if search in VERDICTS["malicious"] or search in VERDICTS["suspicious"]:
+                cols.append("%s::%s::%s" % (key, val, id))
+
+    # Append headers for the summary of the remaining attacks and MBCs.
+    cols.append("Others Sum")
+    cols.append("Others")
 
     ostream.write("\t".join(cols))
 
