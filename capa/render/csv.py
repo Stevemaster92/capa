@@ -46,12 +46,12 @@ def render_meta(doc, ostream: StringIO):
     cols = [
         doc["meta"]["sample"]["path"],
         "OK",  # no error
-        # doc["meta"]["sample"]["md5"],
-        # doc["meta"]["sample"]["sha1"],
+        doc["meta"]["sample"]["md5"],
+        doc["meta"]["sample"]["sha1"],
         doc["meta"]["sample"]["sha256"],
         doc["meta"]["analysis"]["os"],
         doc["meta"]["analysis"]["format"],
-        # doc["meta"]["analysis"]["arch"],
+        doc["meta"]["analysis"]["arch"],
     ]
 
     ostream.write("\t".join(cols))
@@ -228,12 +228,12 @@ def render_header():
     cols = [
         "Path",
         "Error",
-        # "MD5",
-        # "SHA1",
+        "MD5",
+        "SHA1",
         "SHA256",
         "OS",
         "Format",
-        # "Architecture",
+        "Architecture",
         "ATT&CK Tactics",
         "ATT&CK Techniques",
         "MBC Objectives",

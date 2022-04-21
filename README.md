@@ -218,19 +218,24 @@ Besides the [analysis timeout](#analysis-timeout), the user is able to _graceful
 
 ## CSV report
 
+The code for rendering the CSV report can be found in [render/csv.py](./capa/render/csv.py).
+
 By passing the `-c` or `--csv` flag, capa creates a predefined CSV report from the result document. A row in the CSV report represents a result document and consists of the following entries:
 
--   the relevant metadata (path, sha256, os, format)
--   the error code and message
--   the total number of ATT&CK tactics
--   the total number of ATT&CK techniques
--   the total number of MBC objectives
--   the total number of MBC behaviors
--   the total number of capabilities
--   an entry for each ATT&CK tactic-technique pair indicating if the corresponding capability was found (1) or not (0)
--   an entry for each MBC objective-behavior pair indicating if the corresponding capability was found (1) or not (0)
+-   **Path:** the absoulte file path to the analyzed sample
+-   **Error:** the error code and message
+-   **\<metadata\>:** the relevant metadata extracted from the sample (`md5`, `sha1`, `sha256`, `os`, `format`, `architecture`)
+-   **ATT&CK Tactics:** the total number of ATT&CK tactics
+-   **ATT&CK Techniques:** the total number of ATT&CK techniques
+-   **MBC Objectives:** the total number of MBC objectives
+-   **MBC Behaviors:** the total number of MBC behaviors
+-   **Capabilities:** the total number of additional capabilities (neither ATT&CK nor MBC)
+-   **Verdict:** the verdict indicating if the sample is `MALICIOUS` or `SUSPICIOUS`
+-   **\<main\>::\<sub\>::\<id\>:** a number of selected ATT&CK tactic-technique and MBC objective-behavior pairs indicating if the corresponding capability was found (1) or not (0)
+-   **Others Sum:** the total number of remaining ATT&CK tactic-technique and MBC objective-behavior pairs not present in the previous columns
+-   **Others:** the list of remaining ATT&CK tactic-technique and MBC objective-behavior pairs not present in the previous columns
 
-The CSV report is stored to a file `<sample-filename>-<timestamp>.csv`. The code for rendering the CSV report can be found in `render/csv.py`. _Note: You can uncomment the remaining metadata fields in the code to add them to the CSV report._
+The CSV report is stored to a file `<sample-filename>-<timestamp>.csv`.
 
 Here's an example on how to create a CSV report from the analysis of a directory containing suspicious files:
 
