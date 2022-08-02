@@ -44,7 +44,7 @@ import capa.engine
 import capa.helpers
 import capa.features.insn
 from capa.rules import Rule, RuleSet
-from capa.features.common import String, Feature, Substring
+from capa.features.common import FORMAT_PE, FORMAT_DOTNET, String, Feature, Substring
 
 logger = logging.getLogger("lint")
 
@@ -105,6 +105,7 @@ class FilenameDoesntMatchRuleName(Lint):
     def check_rule(self, ctx: Context, rule: Rule):
         expected = rule.name
         expected = expected.lower()
+        expected = expected.replace(".net", "dotnet")
         expected = expected.replace(" ", "-")
         expected = expected.replace("(", "")
         expected = expected.replace(")", "")
@@ -222,6 +223,25 @@ class ExampleFileDNE(Lint):
         return not found
 
 
+class IncorrectValueType(Lint):
+    name = "incorrect value type"
+    recommendation = "Change value type"
+    recommendation_template = 'Change type of "{:s}" from "{:s}" to "{:s}'
+    types = {
+        "references": list,
+        "authors": list,
+    }
+
+    def check_rule(self, ctx: Context, rule: Rule):
+        for k, expected in self.types.items():
+            value = rule.meta.get(k)
+            found = type(value)
+            if value and found != expected:
+                self.recommendation = self.recommendation_template.format(k, str(found), str(expected))
+                return True
+        return False
+
+
 class InvalidAttckOrMbcTechnique(Lint):
     name = "att&ck/mbc entry is malformed or does not exist"
     recommendation = """
@@ -292,11 +312,13 @@ def get_sample_capabilities(ctx: Context, path: Path) -> Set[str]:
         format_ = "sc64"
     else:
         format_ = "auto"
+        if not nice_path.endswith(capa.helpers.EXTENSIONS_ELF):
+            dnfile_extractor = capa.features.extractors.dnfile_.DnfileFeatureExtractor(nice_path)
+            if dnfile_extractor.is_dotnet_file():
+                format_ = FORMAT_DOTNET
 
     logger.debug("analyzing sample: %s", nice_path)
-    extractor = capa.main.get_extractor(
-        nice_path, format_, capa.main.BACKEND_VIV, DEFAULT_SIGNATURES, False, disable_progress=True
-    )
+    extractor = capa.main.get_extractor(nice_path, format_, "", DEFAULT_SIGNATURES, False, disable_progress=True)
 
     capabilities, _ = capa.main.find_capabilities(ctx.rules, extractor, disable_progress=True)
     # mypy doesn't seem to be happy with the MatchResults type alias & set(...keys())?
@@ -700,6 +722,7 @@ META_LINTS = (
     MissingExamples(),
     MissingExampleOffset(),
     ExampleFileDNE(),
+    IncorrectValueType(),
     UnusualMetaField(),
     LibRuleNotInLibDirectory(),
     LibRuleHasNamespace(),
@@ -800,15 +823,12 @@ def lint_rule(ctx: Context, rule: Rule):
         # this is by far the most common reason to be in the nursery,
         # and ends up just producing a lot of noise.
         if not (is_nursery_rule(rule) and len(violations) == 1 and violations[0].name == "missing examples"):
-            category = rule.meta.get("rule-category")
-
             print("")
             print(
-                "%s%s %s"
+                "%s%s"
                 % (
                     "    (nursery) " if is_nursery_rule(rule) else "",
                     rule.name,
-                    ("(%s)" % category) if category else "",
                 )
             )
 
@@ -904,7 +924,7 @@ def lint(ctx: Context):
     with tqdm.contrib.logging.tqdm_logging_redirect(ctx.rules.rules.items(), unit="rule") as pbar:
         with redirecting_print_to_tqdm():
             for name, rule in pbar:
-                if rule.meta.get("capa/subscope-rule", False):
+                if rule.is_subscope_rule():
                     continue
 
                 pbar.set_description(width("linting rule: %s" % (name), 48))
