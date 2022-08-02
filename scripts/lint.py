@@ -43,9 +43,8 @@ import capa.rules
 import capa.engine
 import capa.helpers
 import capa.features.insn
-import capa.features.common
 from capa.rules import Rule, RuleSet
-from capa.features.common import Feature
+from capa.features.common import FORMAT_PE, FORMAT_DOTNET, String, Feature, Substring
 
 logger = logging.getLogger("lint")
 
@@ -106,6 +105,7 @@ class FilenameDoesntMatchRuleName(Lint):
     def check_rule(self, ctx: Context, rule: Rule):
         expected = rule.name
         expected = expected.lower()
+        expected = expected.replace(".net", "dotnet")
         expected = expected.replace(" ", "-")
         expected = expected.replace("(", "")
         expected = expected.replace(")", "")
@@ -168,12 +168,12 @@ class InvalidScope(Lint):
         return rule.meta.get("scope") not in ("file", "function", "basic block", "instruction")
 
 
-class MissingAuthor(Lint):
-    name = "missing author"
-    recommendation = "Add meta.author so that users know who to contact with questions"
+class MissingAuthors(Lint):
+    name = "missing authors"
+    recommendation = "Add meta.authors so that users know who to contact with questions"
 
     def check_rule(self, ctx: Context, rule: Rule):
-        return "author" not in rule.meta
+        return "authors" not in rule.meta
 
 
 class MissingExamples(Lint):
@@ -221,6 +221,25 @@ class ExampleFileDNE(Lint):
                     break
 
         return not found
+
+
+class IncorrectValueType(Lint):
+    name = "incorrect value type"
+    recommendation = "Change value type"
+    recommendation_template = 'Change type of "{:s}" from "{:s}" to "{:s}'
+    types = {
+        "references": list,
+        "authors": list,
+    }
+
+    def check_rule(self, ctx: Context, rule: Rule):
+        for k, expected in self.types.items():
+            value = rule.meta.get(k)
+            found = type(value)
+            if value and found != expected:
+                self.recommendation = self.recommendation_template.format(k, str(found), str(expected))
+                return True
+        return False
 
 
 class InvalidAttckOrMbcTechnique(Lint):
@@ -293,11 +312,13 @@ def get_sample_capabilities(ctx: Context, path: Path) -> Set[str]:
         format_ = "sc64"
     else:
         format_ = "auto"
+        if not nice_path.endswith(capa.helpers.EXTENSIONS_ELF):
+            dnfile_extractor = capa.features.extractors.dnfile_.DnfileFeatureExtractor(nice_path)
+            if dnfile_extractor.is_dotnet_file():
+                format_ = FORMAT_DOTNET
 
     logger.debug("analyzing sample: %s", nice_path)
-    extractor = capa.main.get_extractor(
-        nice_path, format_, capa.main.BACKEND_VIV, DEFAULT_SIGNATURES, False, disable_progress=True
-    )
+    extractor = capa.main.get_extractor(nice_path, format_, "", DEFAULT_SIGNATURES, False, disable_progress=True)
 
     capabilities, _ = capa.main.find_capabilities(ctx.rules, extractor, disable_progress=True)
     # mypy doesn't seem to be happy with the MatchResults type alias & set(...keys())?
@@ -490,7 +511,7 @@ class FeatureStringTooShort(Lint):
 
     def check_features(self, ctx: Context, features: List[Feature]):
         for feature in features:
-            if isinstance(feature, (capa.features.common.String, capa.features.common.Substring)):
+            if isinstance(feature, (String, Substring)):
                 assert isinstance(feature.value, str)
                 if len(feature.value) < 4:
                     self.recommendation = self.recommendation.format(feature.value)
@@ -697,10 +718,11 @@ def lint_scope(ctx: Context, rule: Rule):
 META_LINTS = (
     MissingNamespace(),
     NamespaceDoesntMatchRulePath(),
-    MissingAuthor(),
+    MissingAuthors(),
     MissingExamples(),
     MissingExampleOffset(),
     ExampleFileDNE(),
+    IncorrectValueType(),
     UnusualMetaField(),
     LibRuleNotInLibDirectory(),
     LibRuleHasNamespace(),
@@ -801,15 +823,12 @@ def lint_rule(ctx: Context, rule: Rule):
         # this is by far the most common reason to be in the nursery,
         # and ends up just producing a lot of noise.
         if not (is_nursery_rule(rule) and len(violations) == 1 and violations[0].name == "missing examples"):
-            category = rule.meta.get("rule-category")
-
             print("")
             print(
-                "%s%s %s"
+                "%s%s"
                 % (
                     "    (nursery) " if is_nursery_rule(rule) else "",
                     rule.name,
-                    ("(%s)" % category) if category else "",
                 )
             )
 
@@ -905,7 +924,7 @@ def lint(ctx: Context):
     with tqdm.contrib.logging.tqdm_logging_redirect(ctx.rules.rules.items(), unit="rule") as pbar:
         with redirecting_print_to_tqdm():
             for name, rule in pbar:
-                if rule.meta.get("capa/subscope-rule", False):
+                if rule.is_subscope_rule():
                     continue
 
                 pbar.set_description(width("linting rule: %s" % (name), 48))

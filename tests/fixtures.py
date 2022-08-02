@@ -13,6 +13,7 @@ import binascii
 import itertools
 import contextlib
 import collections
+from typing import Set, Dict
 from functools import lru_cache
 
 import pytest
@@ -34,7 +35,11 @@ from capa.features.common import (
     FORMAT_DOTNET,
     Arch,
     Format,
+    Feature,
 )
+from capa.features.address import Address
+from capa.features.extractors.base_extractor import BBHandle, InsnHandle, FunctionHandle
+from capa.features.extractors.dnfile.extractor import DnfileFeatureExtractor
 
 CD = os.path.dirname(__file__)
 DOTNET_DIR = os.path.join(CD, "data", "dotnet")
@@ -133,20 +138,35 @@ def get_smda_extractor(path):
 def get_pefile_extractor(path):
     import capa.features.extractors.pefile
 
-    return capa.features.extractors.pefile.PefileFeatureExtractor(path)
+    extractor = capa.features.extractors.pefile.PefileFeatureExtractor(path)
+
+    # overload the extractor so that the fixture exposes `extractor.path`
+    setattr(extractor, "path", path)
+
+    return extractor
 
 
 def get_dotnetfile_extractor(path):
     import capa.features.extractors.dotnetfile
 
-    return capa.features.extractors.dotnetfile.DotnetFileFeatureExtractor(path)
+    extractor = capa.features.extractors.dotnetfile.DotnetFileFeatureExtractor(path)
+
+    # overload the extractor so that the fixture exposes `extractor.path`
+    setattr(extractor, "path", path)
+
+    return extractor
 
 
 @lru_cache(maxsize=1)
 def get_dnfile_extractor(path):
     import capa.features.extractors.dnfile.extractor
 
-    return capa.features.extractors.dnfile.extractor.DnfileFeatureExtractor(path)
+    extractor = capa.features.extractors.dnfile.extractor.DnfileFeatureExtractor(path)
+
+    # overload the extractor so that the fixture exposes `extractor.path`
+    setattr(extractor, "path", path)
+
+    return extractor
 
 
 def extract_global_features(extractor):
@@ -165,35 +185,35 @@ def extract_file_features(extractor):
 
 
 # f may not be hashable (e.g. ida func_t) so cannot @lru_cache this
-def extract_function_features(extractor, f):
+def extract_function_features(extractor, fh):
     features = collections.defaultdict(set)
-    for bb in extractor.get_basic_blocks(f):
-        for insn in extractor.get_instructions(f, bb):
-            for feature, va in extractor.extract_insn_features(f, bb, insn):
+    for bb in extractor.get_basic_blocks(fh):
+        for insn in extractor.get_instructions(fh, bb):
+            for feature, va in extractor.extract_insn_features(fh, bb, insn):
                 features[feature].add(va)
-        for feature, va in extractor.extract_basic_block_features(f, bb):
+        for feature, va in extractor.extract_basic_block_features(fh, bb):
             features[feature].add(va)
-    for feature, va in extractor.extract_function_features(f):
+    for feature, va in extractor.extract_function_features(fh):
         features[feature].add(va)
     return features
 
 
 # f may not be hashable (e.g. ida func_t) so cannot @lru_cache this
-def extract_basic_block_features(extractor, f, bb):
+def extract_basic_block_features(extractor, fh, bbh):
     features = collections.defaultdict(set)
-    for insn in extractor.get_instructions(f, bb):
-        for feature, va in extractor.extract_insn_features(f, bb, insn):
+    for insn in extractor.get_instructions(fh, bbh):
+        for feature, va in extractor.extract_insn_features(fh, bbh, insn):
             features[feature].add(va)
-    for feature, va in extractor.extract_basic_block_features(f, bb):
+    for feature, va in extractor.extract_basic_block_features(fh, bbh):
         features[feature].add(va)
     return features
 
 
 # f may not be hashable (e.g. ida func_t) so cannot @lru_cache this
-def extract_instruction_features(extractor, f, bb, insn):
+def extract_instruction_features(extractor, fh, bbh, ih) -> Dict[Feature, Set[Address]]:
     features = collections.defaultdict(set)
-    for feature, va in extractor.extract_insn_features(f, bb, insn):
-        features[feature].add(va)
+    for feature, addr in extractor.extract_insn_features(fh, bbh, ih):
+        features[feature].add(addr)
     return features
 
 
@@ -247,6 +267,8 @@ def get_data_path_by_name(name):
         return os.path.join(CD, "data", "79abd17391adc6251ecdc58d13d76baf.dll_")
     elif name.startswith("946a9"):
         return os.path.join(CD, "data", "946a99f36a46d335dec080d9a4371940.dll_")
+    elif name.startswith("2f7f5f"):
+        return os.path.join(CD, "data", "2f7f5fb5de175e770d7eae87666f9831.elf_")
     elif name.startswith("b9f5b"):
         return os.path.join(CD, "data", "b9f5bd514485fb06da39beff051b9fdc.exe_")
     elif name.startswith("mixed-mode-64"):
@@ -255,6 +277,8 @@ def get_data_path_by_name(name):
         return os.path.join(DNFILE_TESTFILES, "hello-world", "hello-world.exe")
     elif name.startswith("_1c444"):
         return os.path.join(CD, "data", "dotnet", "1c444ebeba24dcba8628b7dfe5fec7c6.exe_")
+    elif name.startswith("_692f"):
+        return os.path.join(CD, "data", "dotnet", "692f7fd6d198e804d6af98eb9e390d61.exe_")
     else:
         raise ValueError("unexpected sample fixture: %s" % name)
 
@@ -323,24 +347,43 @@ def sample(request):
     return resolve_sample(request.param)
 
 
-def get_function(extractor, fva):
-    for f in extractor.get_functions():
-        if int(f) == fva:
-            return f
+def get_function(extractor, fva: int) -> FunctionHandle:
+    for fh in extractor.get_functions():
+        if isinstance(extractor, DnfileFeatureExtractor):
+            addr = fh.inner.offset
+        else:
+            addr = fh.address
+        if addr == fva:
+            return fh
     raise ValueError("function not found")
 
 
-def get_basic_block(extractor, f, va):
-    for bb in extractor.get_basic_blocks(f):
-        if int(bb) == va:
-            return bb
+def get_function_by_token(extractor, token: int) -> FunctionHandle:
+    for fh in extractor.get_functions():
+        if fh.address.token.value == token:
+            return fh
+    raise ValueError("function not found by token")
+
+
+def get_basic_block(extractor, fh: FunctionHandle, va: int) -> BBHandle:
+    for bbh in extractor.get_basic_blocks(fh):
+        if isinstance(extractor, DnfileFeatureExtractor):
+            addr = bbh.inner.offset
+        else:
+            addr = bbh.address
+        if addr == va:
+            return bbh
     raise ValueError("basic block not found")
 
 
-def get_instruction(extractor, f, bb, va):
-    for insn in extractor.get_instructions(f, bb):
-        if int(insn) == va:
-            return insn
+def get_instruction(extractor, fh: FunctionHandle, bbh: BBHandle, va: int) -> InsnHandle:
+    for ih in extractor.get_instructions(fh, bbh):
+        if isinstance(extractor, DnfileFeatureExtractor):
+            addr = ih.inner.offset
+        else:
+            addr = ih.address
+        if addr == va:
+            return ih
     raise ValueError("instruction not found")
 
 
@@ -367,10 +410,10 @@ def resolve_scope(scope):
         iva = int(ispec.partition("=")[2], 0x10)
 
         def inner_insn(extractor):
-            f = get_function(extractor, fva)
-            bb = get_basic_block(extractor, f, bbva)
-            insn = get_instruction(extractor, f, bb, iva)
-            features = extract_instruction_features(extractor, f, bb, insn)
+            fh = get_function(extractor, fva)
+            bbh = get_basic_block(extractor, fh, bbva)
+            ih = get_instruction(extractor, fh, bbh, iva)
+            features = extract_instruction_features(extractor, fh, bbh, ih)
             for k, vs in extract_global_features(extractor).items():
                 features[k].update(vs)
             return features
@@ -386,22 +429,25 @@ def resolve_scope(scope):
         bbva = int(bbspec.partition("=")[2], 0x10)
 
         def inner_bb(extractor):
-            f = get_function(extractor, fva)
-            bb = get_basic_block(extractor, f, bbva)
-            features = extract_basic_block_features(extractor, f, bb)
+            fh = get_function(extractor, fva)
+            bbh = get_basic_block(extractor, fh, bbva)
+            features = extract_basic_block_features(extractor, fh, bbh)
             for k, vs in extract_global_features(extractor).items():
                 features[k].update(vs)
             return features
 
         inner_bb.__name__ = scope
         return inner_bb
-    elif scope.startswith("function"):
-        # like `function=0x401000`
+    elif scope.startswith(("function", "token")):
+        # like `function=0x401000` or `token=0x6000001`
         va = int(scope.partition("=")[2], 0x10)
 
         def inner_function(extractor):
-            f = get_function(extractor, va)
-            features = extract_function_features(extractor, f)
+            if scope.startswith("token"):
+                fh = get_function_by_token(extractor, va)
+            else:
+                fh = get_function(extractor, va)
+            features = extract_function_features(extractor, fh)
             for k, vs in extract_global_features(extractor).items():
                 features[k].update(vs)
             return features
@@ -669,12 +715,25 @@ FEATURE_PRESENCE_TESTS_DOTNET = sorted(
         ("b9f5b", "file", Arch(ARCH_AMD64), False),
         ("mixed-mode-64", "file", Arch(ARCH_AMD64), True),
         ("mixed-mode-64", "file", Arch(ARCH_I386), False),
+        ("mixed-mode-64", "file", capa.features.common.Characteristic("mixed mode"), True),
+        ("hello-world", "file", capa.features.common.Characteristic("mixed mode"), False),
         ("b9f5b", "file", OS(OS_ANY), True),
         ("b9f5b", "file", Format(FORMAT_DOTNET), True),
+        ("hello-world", "file", capa.features.file.FunctionName("HelloWorld::Main"), True),
+        ("hello-world", "file", capa.features.file.FunctionName("HelloWorld::.ctor"), True),
+        ("hello-world", "file", capa.features.file.FunctionName("HelloWorld::.cctor"), False),
+        ("hello-world", "file", capa.features.common.String("Hello World!"), True),
+        ("hello-world", "file", capa.features.common.Class("HelloWorld"), True),
+        ("hello-world", "file", capa.features.common.Class("System.Console"), True),
+        ("hello-world", "file", capa.features.common.Namespace("System.Diagnostics"), True),
         ("hello-world", "function=0x250", capa.features.common.String("Hello World!"), True),
         ("hello-world", "function=0x250, bb=0x250, insn=0x252", capa.features.common.String("Hello World!"), True),
+        ("hello-world", "function=0x250, bb=0x250, insn=0x257", capa.features.common.Class("System.Console"), True),
+        ("hello-world", "function=0x250, bb=0x250, insn=0x257", capa.features.common.Namespace("System"), True),
         ("hello-world", "function=0x250", capa.features.insn.API("System.Console::WriteLine"), True),
         ("hello-world", "file", capa.features.file.Import("System.Console::WriteLine"), True),
+        ("_1c444", "file", capa.features.common.String(r"SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall"), True),
+        ("_1c444", "file", capa.features.common.String("get_IsAlive"), True),
         ("_1c444", "file", capa.features.file.Import("gdi32.CreateCompatibleBitmap"), True),
         ("_1c444", "file", capa.features.file.Import("CreateCompatibleBitmap"), True),
         ("_1c444", "file", capa.features.file.Import("gdi32::CreateCompatibleBitmap"), False),
@@ -683,6 +742,15 @@ FEATURE_PRESENCE_TESTS_DOTNET = sorted(
         ("_1c444", "function=0x1F68", capa.features.insn.Number(0xCC0020), True),
         ("_1c444", "function=0x1F68", capa.features.insn.Number(0x0), True),
         ("_1c444", "function=0x1F68", capa.features.insn.Number(0x1), False),
+        (
+            "_1c444",
+            "function=0x1F59, bb=0x1F59, insn=0x1F5B",
+            capa.features.common.Characteristic("unmanaged call"),
+            True,
+        ),
+        ("_1c444", "function=0x2544", capa.features.common.Characteristic("unmanaged call"), False),
+        # same as above but using token instead of function
+        ("_1c444", "token=0x6000088", capa.features.common.Characteristic("unmanaged call"), False),
         (
             "_1c444",
             "function=0x1F68, bb=0x1F68, insn=0x1FF9",
@@ -824,10 +892,15 @@ def mixed_mode_64_dotnetfile_extractor():
 
 
 @pytest.fixture
-def hello_world_dnfile_extractor():
+def hello_world_dotnetfile_extractor():
     return get_dnfile_extractor(get_data_path_by_name("hello-world"))
 
 
 @pytest.fixture
-def _1c444_dnfile_extractor():
-    return get_dnfile_extractor(get_data_path_by_name("1c444..."))
+def _1c444_dotnetfile_extractor():
+    return get_dnfile_extractor(get_data_path_by_name("_1c444"))
+
+
+@pytest.fixture
+def _692f_dotnetfile_extractor():
+    return get_dnfile_extractor(get_data_path_by_name("_692f"))

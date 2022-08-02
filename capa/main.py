@@ -46,8 +46,10 @@ import capa.render.vverbose
 import capa.features.extractors
 import capa.features.extractors.common
 import capa.features.extractors.pefile
+import capa.features.extractors.dnfile_
 import capa.features.extractors.elffile
 import capa.features.extractors.dotnetfile
+import capa.features.extractors.base_extractor
 from capa.rules import Rule, Scope, RuleSet
 from capa.engine import FeatureSet, MatchResults
 from capa.helpers import (
@@ -68,6 +70,7 @@ from capa.features.common import (
     FORMAT_DOTNET,
     FORMAT_FREEZE,
 )
+from capa.features.address import NO_ADDRESS
 from capa.features.extractors.base_extractor import BBHandle, InsnHandle, FunctionHandle, FeatureExtractor
 
 RULES_PATH_DEFAULT_STRING = "(embedded rules)"
@@ -130,6 +133,7 @@ def set_vivisect_log_level(level):
     logging.getLogger("vtrace").setLevel(level)
     logging.getLogger("envi").setLevel(level)
     logging.getLogger("envi.codeflow").setLevel(level)
+    logging.getLogger("Elf").setLevel(level)
 
 
 def find_instruction_capabilities(
@@ -143,18 +147,18 @@ def find_instruction_capabilities(
     # all features found for the instruction.
     features = collections.defaultdict(set)  # type: FeatureSet
 
-    for feature, va in itertools.chain(
+    for feature, addr in itertools.chain(
         extractor.extract_insn_features(f, bb, insn), extractor.extract_global_features()
     ):
-        features[feature].add(va)
+        features[feature].add(addr)
 
     # matches found at this instruction.
-    _, matches = ruleset.match(Scope.INSTRUCTION, features, int(insn))
+    _, matches = ruleset.match(Scope.INSTRUCTION, features, insn.address)
 
     for rule_name, res in matches.items():
         rule = ruleset[rule_name]
-        for va, _ in res:
-            capa.engine.index_rule_matches(features, rule, [va])
+        for addr, _ in res:
+            capa.engine.index_rule_matches(features, rule, [addr])
 
     return features, matches
 
@@ -189,7 +193,7 @@ def find_basic_block_capabilities(
         features[feature].add(va)
 
     # matches found within this basic block.
-    _, matches = ruleset.match(Scope.BASIC_BLOCK, features, int(bb))
+    _, matches = ruleset.match(Scope.BASIC_BLOCK, features, bb.address)
 
     for rule_name, res in matches.items():
         rule = ruleset[rule_name]
@@ -200,7 +204,7 @@ def find_basic_block_capabilities(
 
 
 def find_code_capabilities(
-    ruleset: RuleSet, extractor: FeatureExtractor, f: FunctionHandle
+    ruleset: RuleSet, extractor: FeatureExtractor, fh: FunctionHandle
 ) -> Tuple[MatchResults, MatchResults, MatchResults, int]:
     """
     find matches for the given rules within the given function.
@@ -219,8 +223,8 @@ def find_code_capabilities(
     # might be found at different instructions, thats ok.
     insn_matches = collections.defaultdict(list)  # type: MatchResults
 
-    for bb in extractor.get_basic_blocks(f):
-        features, bmatches, imatches = find_basic_block_capabilities(ruleset, extractor, f, bb)
+    for bb in extractor.get_basic_blocks(fh):
+        features, bmatches, imatches = find_basic_block_capabilities(ruleset, extractor, fh, bb)
         for feature, vas in features.items():
             function_features[feature].update(vas)
 
@@ -230,10 +234,10 @@ def find_code_capabilities(
         for rule_name, res in imatches.items():
             insn_matches[rule_name].extend(res)
 
-    for feature, va in itertools.chain(extractor.extract_function_features(f), extractor.extract_global_features()):
+    for feature, va in itertools.chain(extractor.extract_function_features(fh), extractor.extract_global_features()):
         function_features[feature].add(va)
 
-    _, function_matches = ruleset.match(Scope.FUNCTION, function_features, int(f))
+    _, function_matches = ruleset.match(Scope.FUNCTION, function_features, fh.address)
     return function_matches, bb_matches, insn_matches, len(function_features)
 
 
@@ -254,7 +258,7 @@ def find_file_capabilities(ruleset: RuleSet, extractor: FeatureExtractor, functi
 
     file_features.update(function_features)
 
-    _, matches = ruleset.match(Scope.FILE, file_features, 0x0)
+    _, matches = ruleset.match(Scope.FILE, file_features, NO_ADDRESS)
     return matches, len(file_features)
 
 
@@ -282,12 +286,10 @@ def find_capabilities(ruleset: RuleSet, extractor: FeatureExtractor, disable_pro
 
     pb = pbar(functions, desc="matching", unit=" functions", postfix="skipped 0 library functions")
     for f in pb:
-        function_address = int(f)
-
-        if extractor.is_library_function(function_address):
-            function_name = extractor.get_function_name(function_address)
-            logger.debug("skipping library function 0x%x (%s)", function_address, function_name)
-            meta["library_functions"][function_address] = function_name
+        if extractor.is_library_function(f.address):
+            function_name = extractor.get_function_name(f.address)
+            logger.debug("skipping library function 0x%x (%s)", f.address, function_name)
+            meta["library_functions"][f.address] = function_name
             n_libs = len(meta["library_functions"])
             percentage = 100 * (n_libs / n_funcs)
             if isinstance(pb, tqdm.tqdm):
@@ -295,8 +297,8 @@ def find_capabilities(ruleset: RuleSet, extractor: FeatureExtractor, disable_pro
             continue
 
         function_matches, bb_matches, insn_matches, feature_count = find_code_capabilities(ruleset, extractor, f)
-        meta["feature_counts"]["functions"][function_address] = feature_count
-        logger.debug("analyzed function 0x%x and extracted %d features", function_address, feature_count)
+        meta["feature_counts"]["functions"][f.address] = feature_count
+        logger.debug("analyzed function 0x%x and extracted %d features", f.address, feature_count)
 
         for rule_name, res in function_matches.items():
             all_function_matches[rule_name].extend(res)
@@ -579,9 +581,9 @@ def get_file_extractors(sample: str, format_: str) -> List[FeatureExtractor]:
     if format_ == capa.features.extractors.common.FORMAT_PE:
         file_extractors.append(capa.features.extractors.pefile.PefileFeatureExtractor(sample))
 
-        dotnetfile_extractor = capa.features.extractors.dotnetfile.DotnetFileFeatureExtractor(sample)
-        if dotnetfile_extractor.is_dotnet_file():
-            file_extractors.append(dotnetfile_extractor)
+        dnfile_extractor = capa.features.extractors.dnfile_.DnfileFeatureExtractor(sample)
+        if dnfile_extractor.is_dotnet_file():
+            file_extractors.append(dnfile_extractor)
 
     elif format_ == capa.features.extractors.common.FORMAT_ELF:
         file_extractors.append(capa.features.extractors.elffile.ElfFeatureExtractor(sample))
@@ -613,12 +615,13 @@ def get_rules(rule_paths: List[str], disable_progress=False) -> List[Rule]:
         elif os.path.isdir(rule_path):
             logger.debug("reading rules from directory %s", rule_path)
             for root, dirs, files in os.walk(rule_path):
-                if ".github" in root:
+                if ".git" in root:
                     # the .github directory contains CI config in capa-rules
                     # this includes some .yml files
                     # these are not rules
+                    # additionally, .git has files that are not .yml and generate the warning
+                    # skip those too
                     continue
-
                 for file in files:
                     if not file.endswith(".yml"):
                         if not (file.startswith(".git") or file.endswith((".git", ".md", ".txt"))):
@@ -626,7 +629,6 @@ def get_rules(rule_paths: List[str], disable_progress=False) -> List[Rule]:
                             # other things maybe are rules, but are mis-named.
                             logger.warning("skipping non-.yml file: %s", file)
                         continue
-
                     rule_path = os.path.join(root, file)
                     rule_file_paths.append(rule_path)
 
@@ -682,7 +684,12 @@ def get_signatures(sigs_path):
     return paths
 
 
-def collect_metadata(argv, sample_path, rules_path, extractor):
+def collect_metadata(
+    argv: List[str],
+    sample_path: str,
+    rules_path: List[str],
+    extractor: capa.features.extractors.base_extractor.FeatureExtractor,
+):
     md5 = hashlib.md5()
     sha1 = hashlib.sha1()
     sha256 = hashlib.sha256()
@@ -740,10 +747,10 @@ def compute_layout(rules, extractor, capabilities):
     functions_by_bb = {}
     bbs_by_function = {}
     for f in extractor.get_functions():
-        bbs_by_function[int(f)] = []
+        bbs_by_function[f.address] = []
         for bb in extractor.get_basic_blocks(f):
-            functions_by_bb[int(bb)] = int(f)
-            bbs_by_function[int(f)].append(int(bb))
+            functions_by_bb[bb.address] = f.address
+            bbs_by_function[f.address].append(bb.address)
 
     matched_bbs = set()
     for rule_name, matches in capabilities.items():
@@ -1031,7 +1038,7 @@ def load_rules(args) -> Tuple[int, str, RuleSet]:
             # during the load of the RuleSet, we extract subscope statements into their own rules
             # that are subsequently `match`ed upon. this inflates the total rule count.
             # so, filter out the subscope rules when reporting total number of loaded rules.
-            len([i for i in filter(lambda r: "capa/subscope-rule" not in r.meta, rules.rules.values())]),
+            len([i for i in filter(lambda r: not r.is_subscope_rule(), rules.rules.values())]),
         )
         if args.tag:
             rules = rules.filter_rules_by_meta(args.tag)
@@ -1083,6 +1090,9 @@ def analyze_sample(args, sample: str, rules: RuleSet) -> Tuple[int, str, Dict[st
         except (ELFError, OverflowError) as e:
             return (E_CORRUPT_FILE, "Input file is not a valid ELF file: %s" % str(e), None, None)
 
+        if isinstance(file_extractor, capa.features.extractors.dotnetfile.DotnetFileFeatureExtractor):
+            format_ = FORMAT_DOTNET
+
         # file limitations that rely on non-file scope won't be detected here.
         # nor on FunctionName features, because pefile doesn't support this.
         if has_file_limitation(rules, pure_file_capabilities):
@@ -1091,9 +1101,6 @@ def analyze_sample(args, sample: str, rules: RuleSet) -> Tuple[int, str, Dict[st
             if not (args.verbose or args.vverbose or args.json):
                 logger.debug("file limitation short circuit, won't analyze fully.")
                 return (E_FILE_LIMITATION, "File limitation: won't analyze input file fully", None, None)
-
-        if isinstance(file_extractor, capa.features.extractors.dotnetfile.DotnetFileFeatureExtractor):
-            format_ = FORMAT_DOTNET
 
     if format_ == FORMAT_FREEZE:
         with open(sample, "rb") as f:
@@ -1214,6 +1221,7 @@ def main(argv=None):
 
           identify capabilities in binaries and create CSV report
             capa --csv suspicious/
+            capa -c suspicious/
 
           identify capabilities in a binary and log the output to a file
             capa -l suspicious.exe
@@ -1259,6 +1267,18 @@ def main(argv=None):
     ret, msg, rules = load_rules(args)
     if ret != 0:
         logger.error(" %s", msg)
+        logger.error(
+            "Please ensure you're using the rules that correspond to your major version of capa (%s)",
+            capa.version.get_major_version(),
+        )
+        logger.error(
+            "You can check out these rules with the following command:\n    %s",
+            capa.version.get_rules_checkout_command(),
+        )
+        logger.error(
+            "Or, for more details, see the rule set documentation here: %s",
+            "https://github.com/mandiant/capa/blob/master/doc/rules.md",
+        )
         return ret
 
     # Render CSV header first.
@@ -1353,7 +1373,7 @@ def ida_main():
     rules = get_rules(rules_path)
     rules = capa.rules.RuleSet(rules)
 
-    meta = capa.ida.helpers.collect_metadata()
+    meta = capa.ida.helpers.collect_metadata([rules_path])
 
     capabilities, counts = find_capabilities(rules, capa.features.extractors.ida.extractor.IdaFeatureExtractor())
     meta["analysis"].update(counts)

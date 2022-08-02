@@ -12,7 +12,6 @@ import uuid
 import codecs
 import logging
 import binascii
-import functools
 import collections
 from enum import Enum
 
@@ -40,6 +39,7 @@ import capa.features.common
 import capa.features.basicblock
 from capa.engine import Statement, FeatureSet
 from capa.features.common import MAX_BYTES_FEATURE_SIZE, Feature
+from capa.features.address import Address
 
 logger = logging.getLogger(__name__)
 
@@ -48,13 +48,12 @@ logger = logging.getLogger(__name__)
 META_KEYS = (
     "name",
     "namespace",
-    "rule-category",
     "maec/analysis-conclusion",
     "maec/analysis-conclusion-ov",
     "maec/malware-family",
     "maec/malware-category",
     "maec/malware-category-ov",
-    "author",
+    "authors",
     "description",
     "lib",
     "scope",
@@ -91,6 +90,7 @@ SUPPORTED_FEATURES: Dict[str, Set] = {
         # these will be added to other scopes, see below.
         capa.features.common.OS,
         capa.features.common.Arch,
+        capa.features.common.Format,
     },
     FILE_SCOPE: {
         capa.features.common.MatchedRule,
@@ -100,7 +100,9 @@ SUPPORTED_FEATURES: Dict[str, Set] = {
         capa.features.file.FunctionName,
         capa.features.common.Characteristic("embedded pe"),
         capa.features.common.String,
-        capa.features.common.Format,
+        capa.features.common.Class,
+        capa.features.common.Namespace,
+        capa.features.common.Characteristic("mixed mode"),
     },
     FUNCTION_SCOPE: {
         capa.features.common.MatchedRule,
@@ -134,6 +136,9 @@ SUPPORTED_FEATURES: Dict[str, Set] = {
         capa.features.common.Characteristic("indirect call"),
         capa.features.common.Characteristic("call $+5"),
         capa.features.common.Characteristic("cross section flow"),
+        capa.features.common.Characteristic("unmanaged call"),
+        capa.features.common.Class,
+        capa.features.common.Namespace,
     },
 }
 
@@ -280,8 +285,11 @@ def parse_feature(key: str):
     elif key == "format":
         return capa.features.common.Format
     elif key == "arch":
-
         return capa.features.common.Arch
+    elif key == "class":
+        return capa.features.common.Class
+    elif key == "namespace":
+        return capa.features.common.Namespace
     else:
         raise InvalidRule("unexpected statement: %s" % key)
 
@@ -675,6 +683,9 @@ class Rule:
             for child in statement.get_children():
                 for new_rule in self._extract_subscope_rules_rec(child):
                     yield new_rule
+
+    def is_subscope_rule(self):
+        return bool(self.meta.get("capa/subscope-rule", False))
 
     def extract_subscope_rules(self):
         """
@@ -1237,7 +1248,7 @@ class RuleSet:
         #  at lower scope, e.g. function scope.
         # so, we find all dependencies of all rules, and later will filter them down.
         for rule in rules:
-            if rule.meta.get("capa/subscope-rule", False):
+            if rule.is_subscope_rule():
                 continue
 
             scope_rules.update(get_rules_and_dependencies(rules, rule.name))
@@ -1282,9 +1293,15 @@ class RuleSet:
                     logger.debug('using rule "%s" and dependencies, found tag in meta.%s: %s', rule.name, k, v)
                     rules_filtered.update(set(capa.rules.get_rules_and_dependencies(rules, rule.name)))
                     break
+                if isinstance(v, list):
+                    for vv in v:
+                        if tag in vv:
+                            logger.debug('using rule "%s" and dependencies, found tag in meta.%s: %s', rule.name, k, vv)
+                            rules_filtered.update(set(capa.rules.get_rules_and_dependencies(rules, rule.name)))
+                            break
         return RuleSet(list(rules_filtered))
 
-    def match(self, scope: Scope, features: FeatureSet, va: int) -> Tuple[FeatureSet, ceng.MatchResults]:
+    def match(self, scope: Scope, features: FeatureSet, addr: Address) -> Tuple[FeatureSet, ceng.MatchResults]:
         """
         match rules from this ruleset at the given scope against the given features.
 
@@ -1316,7 +1333,7 @@ class RuleSet:
         # first, match against the set of rules that have at least one
         # feature shared with our feature set.
         candidate_rules = [self.rules[name] for name in candidate_rule_names]
-        features2, easy_matches = ceng.match(candidate_rules, features, va)
+        features2, easy_matches = ceng.match(candidate_rules, features, addr)
 
         # note that we've stored the updated feature set in `features2`.
         # this contains a superset of the features in `features`;
@@ -1335,7 +1352,7 @@ class RuleSet:
         # that we can't really make any guesses about.
         # these are rules with hard features, like substring/regex/bytes and match statements.
         hard_rules = [self.rules[name] for name in hard_rule_names]
-        features3, hard_matches = ceng.match(hard_rules, features2, va)
+        features3, hard_matches = ceng.match(hard_rules, features2, addr)
 
         # note that above, we probably are skipping matching a bunch of
         # rules that definitely would never hit.

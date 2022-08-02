@@ -9,6 +9,13 @@
  - add new feature "operand[{0, 1, 2}].offset" for matching instruction operand offsets #767 @williballenthin
  - extract additional offset/number features in certain circumstances #320 @williballenthin
  - add detection and basic feature extraction for dotnet #987 @mr-tz, @mike-hunhoff, @williballenthin
+ - add file string extraction for dotnet files #1012 @mike-hunhoff
+ - add file function-name extraction for dotnet files #1015 @mike-hunhoff
+ - add unmanaged call characteristic for dotnet files #1023 @mike-hunhoff
+ - add mixed mode characteristic feature extraction for dotnet files #1024 @mike-hunhoff
+ - emit class and namespace features for dotnet files #1030 @mike-hunhoff
+ - render: support Addresses that aren't simple integers, like .NET token+offset #981 @williballenthin
+ - document rule tags and branches #1006 @williballenthin, @mr-tz
 
 ### Breaking Changes
 
@@ -16,22 +23,52 @@
   - Python 3.7 is now the minimum supported Python version #866 @williballenthin
   - remove /x32 and /x64 flavors of number and operand features #932 @williballenthin
   - the tool now accepts multiple paths to rules, and JSON doc updated accordingly @williballenthin
+  - extractors must use handles to identify functions/basic blocks/instructions #981 @williballenthin
+  - the freeze file format schema was updated, including format version bump to v2 #986 @williballenthin
 
-### New Rules (5)
+Deprecation notice: as described in [#937](https://github.com/mandiant/capa/issues/937), we plan to remove the SMDA backend for v5. If you rely on this backend, please reach out so we can discuss extending the support for SMDA or transitioning your workflow to use vivisect.
+
+### New Rules (28)
 
 - data-manipulation/encryption/aes/manually-build-aes-constants huynh.t.nhan@gmail.com
 - nursery/get-process-image-filename michael.hunhoff@mandiant.com
 - compiler/v/compiled-with-v jakub.jozwiak@mandiant.com
 - compiler/zig/compiled-with-zig jakub.jozwiak@mandiant.com
 - anti-analysis/packer/huan/packed-with-huan jakub.jozwiak@mandiant.com
+- internal/limitation/file/internal-dotnet-file-limitation william.ballenthin@mandiant.com
+- nursery/get-os-information-via-kuser_shared_data @mr-tz
+- load-code/pe/resolve-function-by-parsing-PE-exports sara-rn
+- anti-analysis/packer/huan/packed-with-huan jakub.jozwiak@mandiant.com
+- nursery/execute-dotnet-assembly anushka.virgaonkar@mandiant.com
+- nursery/invoke-dotnet-assembly-method anushka.virgaonkar@mandiant.com
+- collection/screenshot/capture-screenshot-via-keybd-event @_re_fox
+- collection/browser/gather-chrome-based-browser-login-information @_re_fox
+- nursery/power-down-monitor michael.hunhoff@mandiant.com
+- nursery/hash-data-using-aphash @_re_fox
+- nursery/hash-data-using-jshash @_re_fox
+- host-interaction/file-system/files/list/enumerate-files-on-windows moritz.raabe@mandiant.com anushka.virgaonkar@mandiant.com
+- nursery/check-clipboard-data anushka.virgaonkar@mandiant.com
+- nursery/clear-clipboard-data anushka.virgaonkar@mandiant.com
+- nursery/compile-dotnet-assembly anushka.virgaonkar@mandiant.com
+- nursery/create-process-via-wmi anushka.virgaonkar@mandiant.com
+- nursery/display-service-notification-message-box anushka.virgaonkar@mandiant.com
+- nursery/find-process-by-name anushka.virgaonkar@mandiant.com
+- nursery/generate-random-numbers-in-dotnet anushka.virgaonkar@mandiant.com
+- nursery/send-keystrokes anushka.virgaonkar@mandiant.com
+- nursery/send-request-in-dotnet anushka.virgaonakr@mandiant.com
+- nursery/terminate-process-by-name-in-dotnet anushka.virgaonkar@mandiant.com
+- nursery/hash-data-using-rshash @_re_fox
 -
 
 ### Bug Fixes
 - improve handling _ prefix compile/link artifact #924 @mike-hunhoff
+- better detect OS in ELF samples #988 @williballenthin
+- display number feature zero in vverbose #1097 @mike-hunhoff
 
 ### capa explorer IDA Pro plugin
 - improve file format extraction #918 @mike-hunhoff
 - remove decorators added by IDA to ELF imports #919 @mike-hunhoff
+- bug fixes for Address abstraction #1091 @mike-hunhoff
 
 ### Development
 
