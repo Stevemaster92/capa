@@ -1221,6 +1221,7 @@ def main(argv=None):
 
           identify capabilities in binaries and create CSV report
             capa --csv suspicious/
+            capa -c suspicious/
 
           identify capabilities in a binary and log the output to a file
             capa -l suspicious.exe
