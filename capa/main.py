@@ -1055,7 +1055,7 @@ def load_rules(args) -> Tuple[int, str, RuleSet]:
     return (0, "OK", rules)
 
 
-def analyze_sample(args, sample: str, rules: RuleSet) -> Tuple[int, str, Dict[str, Any], MatchResults]:
+def analyze_sample(argv: List[str], args, sample: str, rules: RuleSet) -> Tuple[int, str, Dict[str, Any], MatchResults]:
     try:
         _ = get_file_taste(sample)
     except IOError as e:
@@ -1134,7 +1134,7 @@ def analyze_sample(args, sample: str, rules: RuleSet) -> Tuple[int, str, Dict[st
             msg = log_unsupported_os_error()
             return (E_INVALID_FILE_OS, msg, None, None)
 
-    meta = collect_metadata(str(args), sample, args.rules, extractor)
+    meta = collect_metadata(argv, sample, args.rules, extractor)
 
     capabilities, counts = find_capabilities(rules, extractor, disable_progress=args.quiet)
     meta["analysis"].update(counts)
@@ -1306,7 +1306,7 @@ def main(argv=None):
 
             start_time = time.time()
             try:
-                ret, msg, meta, capabilities = analyze_sample(args, sample, rules)
+                ret, msg, meta, capabilities = analyze_sample(argv, args, sample, rules)
                 skip_timeout.set()
 
                 if ret != 0:
@@ -1328,9 +1328,9 @@ def main(argv=None):
                     E_INVALID_UNICODE,
                     "Input file cannot be decoded properly: %s" % str(e), sample, analysis_ts, args.csv
                 )
-            except Exception as e:
-                skip_timeout.set()
-                log_error(E_UNKNOWN, "Unknown error: %s" % str(e), sample, analysis_ts, args.csv)
+            # except Exception as e:
+                # skip_timeout.set()
+                # log_error(E_UNKNOWN, "Unknown error: %s" % str(e), sample, analysis_ts, args.csv)
             finally:
                 thread.join()
                 spinner.info("analysis time: %s" % time.strftime("%H:%M:%S", time.gmtime(time.time() - start_time)))
