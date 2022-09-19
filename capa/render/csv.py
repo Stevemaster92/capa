@@ -2,7 +2,7 @@ import collections
 import itertools
 from typing import Dict
 
-import capa.render.result_document
+import capa.render.result_document as rd
 import capa.render.utils as rutils
 from capa.engine import MatchResults
 from capa.rules import RuleSet
@@ -14,7 +14,7 @@ V_MALICIOUS = 1
 V_SUSPICIOUS = 2
 V_TERMS = ["NONE", "MALICIOUS", "SUSPICIOUS"]
 
-def find_subrule_matches(doc):
+def find_subrule_matches(doc: rd.ResultDocument):
     """
     collect the rule names that have been matched as a subrule match.
     this way we can avoid displaying entries for things that are too specific.
@@ -36,22 +36,22 @@ def find_subrule_matches(doc):
                 matches.add(node["node"]["feature"]["match"])
 
     for rule in rutils.capability_rules(doc):
-        for node in rule["matches"].values():
+        for node in rule.matches.values():
             rec(node)
 
     return matches
 
 
-def render_meta(doc, ostream: StringIO):
+def render_meta(doc: rd.ResultDocument, ostream: StringIO):
     cols = [
-        doc["meta"]["sample"]["path"],
+        doc.meta.sample.path,
         "OK",  # no error
-        doc["meta"]["sample"]["md5"],
-        doc["meta"]["sample"]["sha1"],
-        doc["meta"]["sample"]["sha256"],
-        doc["meta"]["analysis"]["os"],
-        doc["meta"]["analysis"]["format"],
-        doc["meta"]["analysis"]["arch"],
+        doc.meta.sample.md5,
+        doc.meta.sample.sha1,
+        doc.meta.sample.sha256,
+        doc.meta.analysis.os,
+        doc.meta.analysis.format,
+        doc.meta.analysis.arch,
     ]
 
     ostream.write("\t".join(cols))
@@ -121,7 +121,7 @@ def render_verdict(attack: dict, mbc: dict, ostream: StringIO):
     ostream.write(V_TERMS[verdict])
     ostream.write("\t")
 
-def get_items(doc, key: str):
+def get_items(doc: rd.ResultDocument, key: str):
     """
     extract items by type specified by `key`, e.g. capability, att&ck, mbc.
     """
@@ -133,18 +133,18 @@ def get_items(doc, key: str):
     for rule in rutils.capability_rules(doc):
         # Capabilities and namespaces
         if key == "capability":
-            if rule["meta"]["name"] in subrule_matches:
+            if rule.meta.name in subrule_matches:
                 # rules that are also matched by other rules should not get rendered by default.
                 # this cuts down on the amount of output while giving approx the same detail.
                 # see #224
                 continue
 
-            items[rule["meta"]["name"]].add(rule["meta"]["namespace"])
+            items[rule.meta.name].add(rule.meta.namespace)
         else:
-            if not rule["meta"].get(key):
+            if not rule.meta.get(key):
                 continue
 
-            for val in rule["meta"][key]:
+            for val in rule.meta.get(key):
                 if key == "att&ck":
                     # ATT&CK tactics and techniques
                     items[val["tactic"]].add((val["technique"], val.get("subtechnique"), val["id"]))
@@ -205,7 +205,7 @@ def render_others(attack: dict, mbc: dict, ostream: StringIO):
     ostream.write(", ".join(others))
 
 
-def render_csv(doc):
+def render_csv(doc: rd.ResultDocument):
     ostream = rutils.StringIO()
 
     s_attack = get_items(doc, "att&ck")
@@ -273,5 +273,5 @@ def render_error(code: int, msg: str, path: str):
 
 
 def render(meta, rules: RuleSet, capabilities: MatchResults) -> str:
-    doc = capa.render.result_document.convert_capabilities_to_result_document(meta, rules, capabilities)
+    doc = rd.ResultDocument.from_capa(meta, rules, capabilities)
     return render_csv(doc)
