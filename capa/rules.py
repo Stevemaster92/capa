@@ -27,6 +27,7 @@ except ImportError:
 from typing import Any, Set, Dict, List, Tuple, Union, Iterator
 
 import yaml
+import pydantic
 import ruamel.yaml
 
 import capa.perf
@@ -122,6 +123,7 @@ SUPPORTED_FEATURES: Dict[str, Set] = {
     INSTRUCTION_SCOPE: {
         capa.features.common.MatchedRule,
         capa.features.insn.API,
+        capa.features.insn.Property,
         capa.features.insn.Number,
         capa.features.common.String,
         capa.features.common.Bytes,
@@ -290,6 +292,8 @@ def parse_feature(key: str):
         return capa.features.common.Class
     elif key == "namespace":
         return capa.features.common.Namespace
+    elif key == "property":
+        return capa.features.insn.Property
     else:
         raise InvalidRule("unexpected statement: %s" % key)
 
@@ -567,6 +571,20 @@ def build_statements(d, scope: str):
         or (key == "arch" and d[key] not in capa.features.common.VALID_ARCH)
     ):
         raise InvalidRule("unexpected %s value %s" % (key, d[key]))
+
+    elif key.startswith("property/"):
+        access = key[len("property/") :]
+        if access not in capa.features.common.VALID_FEATURE_ACCESS:
+            raise InvalidRule("unexpected %s access %s" % (key, access))
+
+        value, description = parse_description(d[key], key, d.get("description"))
+        try:
+            feature = capa.features.insn.Property(value, access=access, description=description)
+        except ValueError as e:
+            raise InvalidRule(str(e))
+        ensure_feature_valid_for_scope(scope, feature)
+        return feature
+
     else:
         Feature = parse_feature(key)
         value, description = parse_description(d[key], key, d.get("description"))
@@ -800,8 +818,16 @@ class Rule:
     def from_yaml_file(cls, path, use_ruamel=False):
         with open(path, "rb") as f:
             try:
-                return cls.from_yaml(f.read().decode("utf-8"), use_ruamel=use_ruamel)
+                rule = cls.from_yaml(f.read().decode("utf-8"), use_ruamel=use_ruamel)
+                # import here to avoid circular dependency
+                from capa.render.result_document import RuleMetadata
+
+                # validate meta data fields
+                _ = RuleMetadata.from_capa(rule)
+                return rule
             except InvalidRule as e:
+                raise InvalidRuleWithPath(path, str(e))
+            except pydantic.ValidationError as e:
                 raise InvalidRuleWithPath(path, str(e))
 
     def to_yaml(self):
