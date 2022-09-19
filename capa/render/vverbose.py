@@ -131,10 +131,14 @@ def render_feature(ostream, match: rd.Match, feature: frzf.Feature, indent=0):
     if isinstance(feature, frzf.ImportFeature):
         # fixup access to Python reserved name
         value = feature.import_
-    if isinstance(feature, frzf.ClassFeature):
+    elif isinstance(feature, frzf.ClassFeature):
         value = feature.class_
     else:
-        value = getattr(feature, key)
+        # convert attributes to dictionary using aliased names, if applicable
+        value = feature.dict(by_alias=True).get(key, None)
+
+    if value is None:
+        raise ValueError("%s contains None" % key)
 
     if key not in ("regex", "substring"):
         # like:
@@ -147,6 +151,11 @@ def render_feature(ostream, match: rd.Match, feature: frzf.Feature, indent=0):
             value = hex(value)
 
         ostream.write(key)
+
+        if isinstance(feature, frzf.PropertyFeature):
+            if feature.access is not None:
+                ostream.write("/" + feature.access)
+
         ostream.write(": ")
 
         if value:
@@ -289,7 +298,7 @@ def render_rules(ostream, doc: rd.ResultDocument):
         if rule.meta.maec.malware_family:
             rows.append(("maec/malware-family", rule.meta.maec.malware_family))
 
-        if rule.meta.maec.malware_category or rule.meta.maec.malware_category:
+        if rule.meta.maec.malware_category or rule.meta.maec.malware_category_ov:
             rows.append(
                 ("maec/malware-category", rule.meta.maec.malware_category or rule.meta.maec.malware_category_ov)
             )
