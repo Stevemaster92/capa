@@ -3,6 +3,7 @@ import itertools
 from typing import Dict
 
 import capa.render.result_document as rd
+import capa.features.freeze.features as frzf
 import capa.render.utils as rutils
 from capa.engine import MatchResults
 from capa.rules import RuleSet
@@ -21,23 +22,22 @@ def find_subrule_matches(doc: rd.ResultDocument):
     """
     matches = set([])
 
-    def rec(node):
-        if not node["success"]:
+    def rec(match: rd.Match):
+        if not match.success:
             # there's probably a bug here for rules that do `not: match: ...`
             # but we don't have any examples of this yet
             return
 
-        elif node["node"]["type"] == "statement":
-            for child in node["children"]:
+        elif isinstance(match.node, rd.StatementNode):
+            for child in match.children:
                 rec(child)
 
-        elif node["node"]["type"] == "feature":
-            if node["node"]["feature"]["type"] == "match":
-                matches.add(node["node"]["feature"]["match"])
+        elif isinstance(match.node, rd.FeatureNode) and isinstance(match.node.feature, frzf.MatchFeature):
+            matches.add(match.node.feature.match)
 
     for rule in rutils.capability_rules(doc):
-        for node in rule.matches.values():
-            rec(node)
+        for address, match in rule.matches:
+            rec(match)
 
     return matches
 
@@ -141,16 +141,14 @@ def get_items(doc: rd.ResultDocument, key: str):
 
             items[rule.meta.name].add(rule.meta.namespace)
         else:
-            if not rule.meta.get(key):
-                continue
-
-            for val in rule.meta.get(key):
-                if key == "att&ck":
-                    # ATT&CK tactics and techniques
-                    items[val["tactic"]].add((val["technique"], val.get("subtechnique"), val["id"]))
-                elif key == "mbc":
-                    # MBC objectives and behaviors
-                    items[val["objective"]].add((val["behavior"], val.get("method"), val["id"]))
+            # ATT&CK tactics and techniques
+            if len(rule.meta.attack) > 0:
+                for spec in rule.meta.attack:
+                    items[spec.tactic].add((spec.technique, spec.subtechnique, spec.id))
+            # MBC objectives and behaviors
+            elif len(rule.meta.mbc) > 0:
+                for spec in rule.meta.mbc:
+                    items[spec.objective].add((spec.behavior, spec.method, spec.id))
 
     return items
 

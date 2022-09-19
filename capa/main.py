@@ -1328,9 +1328,9 @@ def main(argv=None):
                     E_INVALID_UNICODE,
                     "Input file cannot be decoded properly: %s" % str(e), sample, analysis_ts, args.csv
                 )
-            # except Exception as e:
-                # skip_timeout.set()
-                # log_error(E_UNKNOWN, "Unknown error: %s" % str(e), sample, analysis_ts, args.csv)
+            except Exception as e:
+                skip_timeout.set()
+                log_error(E_UNKNOWN, "Unknown error: %s" % str(e), sample, analysis_ts, args.csv)
             finally:
                 thread.join()
                 spinner.info("analysis time: %s" % time.strftime("%H:%M:%S", time.gmtime(time.time() - start_time)))
