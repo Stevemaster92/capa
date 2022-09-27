@@ -193,7 +193,7 @@ The [capa-testfiles repository](https://github.com/mandiant/capa-testfiles) cont
 
 # changes to original repository
 
-Compared to the features from the original [capa repository](https://github.com/mandiant/capa), I have implemented some quality-of-life addons and made minor changes (e.g. improve code readability).
+Compared to the [original repository](https://github.com/mandiant/capa), I have implemented some quality-of-life features and made minor changes (e.g. improve code readability).
 
 Check out:
 
@@ -211,7 +211,7 @@ In addition to analyzing a single file, capa analyzes all files located in a dir
 Here's an example on how to submit a directory containing multiple suspicious files. Optionally, the results are written to the text file `results.txt`:
 
 ```
-capa.exe suspicious-dir/ [> results.txt]
+capa.exe suspicious-dir/ > results.txt
 ```
 
 ## analysis timeout
