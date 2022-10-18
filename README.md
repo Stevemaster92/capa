@@ -193,13 +193,14 @@ The [capa-testfiles repository](https://github.com/mandiant/capa-testfiles) cont
 
 # changes to original repository
 
-Compared to the features from the original [capa repository](https://github.com/mandiant/capa), I have implemented some quality-of-life addons and made minor changes (e.g. improve code readability).
+Compared to the [original repository](https://github.com/mandiant/capa), I have implemented some quality-of-life features and made minor changes (e.g. improve code readability).
 
 Check out:
 
 -   [analyze directories](#analyze-directories)
 -   [analysis timeout](#analysis-timeout)
 -   [analysis time](#analysis-time)
+-   [analysis speedup](#analysis-speedup)
 -   [abort analysis](#abort-analysis)
 -   [CSV report](#csv-report)
 -   [LOG file export](#log-file-export)
@@ -211,7 +212,7 @@ In addition to analyzing a single file, capa analyzes all files located in a dir
 Here's an example on how to submit a directory containing multiple suspicious files. Optionally, the results are written to the text file `results.txt`:
 
 ```
-capa.exe suspicious-dir/ [> results.txt]
+capa.exe suspicious-dir/ > results.txt
 ```
 
 ## analysis timeout
@@ -231,6 +232,10 @@ The time that the analysis of a sample took is shown at the end of the result in
 ```
 i  analysis time: 00:04:20
 ```
+
+## analysis speedup
+
+The analysis can fail due to multiple reasons and re-analyzing a lot of samples (e.g. inside a directory) takes extra but unnecessary time. Therefore, already analyzed samples - both successfully and failed - are tracked in a file `done.txt` such that they won't be analyzed again in a subsequent run. Moreover, if the corresponding log file exists (see [LOG file export](#log-file-export)), the analysis for that sample will be skipped as well.
 
 ## abort analysis
 
