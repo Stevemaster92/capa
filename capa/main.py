@@ -98,6 +98,7 @@ E_UNKNOWN = -22
 ANSI_ESCAPE = re.compile(r'\x1B(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~])')
 
 logger = logging.getLogger("capa")
+done_file = os.path.join(os.getcwd(), "done.txt")
 
 
 class TimeoutThread(Thread):
@@ -1196,6 +1197,19 @@ def clog_exists(sample: str):
 
     return False
 
+def is_analysis_done(sample: str):
+    done = False
+
+    try:
+        with open(done_file) as file:
+            for l in file.readlines():
+                if sample in l:
+                    done = True
+                    break
+    except FileNotFoundError:
+        pass
+
+    return done
 
 def main(argv=None):
     if sys.version_info < (3, 7):
@@ -1295,8 +1309,8 @@ def main(argv=None):
     total_samples = len(samples)
     for sample in samples:
 
-        if clog_exists(sample):
-            spinner.info("skipping '%s' as log file exists" % sample)
+        if is_analysis_done(sample) or clog_exists(sample):
+            spinner.info("[%s] skipping '%s'" % (str(datetime.datetime.now()), sample))
         else:
             spinner.info("[%s] analyzing '%s' (press Ctrl+C to abort)" % (str(datetime.datetime.now()), sample))
 
@@ -1336,8 +1350,10 @@ def main(argv=None):
                 thread.join()
                 spinner.info("analysis time: %s" % time.strftime("%H:%M:%S", time.gmtime(time.time() - start_time)))
 
-            # Force garbage collection.
+            # Cleanup
             spinner.info("cleaning up '%s'" % sample)
+            open(done_file, "a").write(sample + "\n")
+            # Force garbage collection.
             gc.collect()
 
         samples_done += 1
