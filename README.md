@@ -200,6 +200,7 @@ Check out:
 -   [analyze directories](#analyze-directories)
 -   [analysis timeout](#analysis-timeout)
 -   [analysis time](#analysis-time)
+-   [analysis speedup](#analysis-speedup)
 -   [abort analysis](#abort-analysis)
 -   [CSV report](#csv-report)
 -   [LOG file export](#log-file-export)
@@ -231,6 +232,10 @@ The time that the analysis of a sample took is shown at the end of the result in
 ```
 i  analysis time: 00:04:20
 ```
+
+## analysis speedup
+
+The analysis can fail due to multiple reasons and re-analyzing a lot of samples (e.g. inside a directory) takes extra but unnecessary time. Therefore, already analyzed samples - both successfully and failed - are tracked in a file `done.txt` such that they won't be analyzed again in a subsequent run. Moreover, if the corresponding log file exists (see [LOG file export](#log-file-export)), the analysis for that sample will be skipped as well.
 
 ## abort analysis
 
