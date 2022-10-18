@@ -1294,10 +1294,11 @@ def main(argv=None):
     samples_done = 0
     total_samples = len(samples)
     for sample in samples:
+
         if clog_exists(sample):
             spinner.info("skipping '%s' as log file exists" % sample)
         else:
-            spinner.info("analyzing '%s' (press Ctrl+C to abort)" % sample)
+            spinner.info("[%s] analyzing '%s' (press Ctrl+C to abort)" % (str(datetime.datetime.now()), sample))
 
             # Prepare timeout event.
             skip_timeout.clear()
